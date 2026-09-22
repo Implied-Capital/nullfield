@@ -58,7 +58,7 @@ def read_json(path: Path) -> dict:
 def atomic_text(path: Path, text: str) -> None:
     """Replace one file atomically; each notebook record has its own unique path."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=".qr-", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix=".nullfield-", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             stream.write(text)
@@ -75,7 +75,7 @@ def write_json(path: Path, data: dict) -> None:
 
 class Store:
     def __init__(self, home: Path | str | None = None):
-        self.home = Path(home or os.environ.get("QR_HOME", "~/.quant-research")).expanduser().resolve()
+        self.home = Path(home or os.environ.get("NULLFIELD_HOME", "~/.nullfield")).expanduser().resolve()
         self.home.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.home / "registry.sqlite3", timeout=15)
         self.db.row_factory = sqlite3.Row
@@ -149,7 +149,7 @@ class Store:
     def project(self, selector: str) -> dict:
         row = self.db.execute("SELECT * FROM projects WHERE alias = ? OR id = ?", (selector, selector)).fetchone()
         if not row:
-            raise ResearchError(f"Unknown project: {selector}. Use 'qr project list' or 'qr project register'.")
+            raise ResearchError(f"Unknown project: {selector}. Use 'nullfield project list' or 'nullfield project register'.")
         data = self._manifest(Path(row["path"]))
         if data["id"] != row["id"]:
             raise ResearchError("Project identity changed on disk. Register the correct project directory.")

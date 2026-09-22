@@ -12,9 +12,9 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from quant_research.experiments import run_experiment
-from quant_research.integration import install_skill
-from quant_research.store import (ResearchError, Store, add_entry, context,
+from nullfield.experiments import run_experiment
+from nullfield.integration import install_skill
+from nullfield.store import (ResearchError, Store, add_entry, context,
                                  create_study, get_record, list_records, search)
 
 
@@ -32,7 +32,7 @@ class ResearchTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def cli(self, *args):
-        return subprocess.run([sys.executable, "-m", "quant_research", "--home", str(self.home), *args],
+        return subprocess.run([sys.executable, "-m", "nullfield", "--home", str(self.home), *args],
                               text=True, capture_output=True, timeout=20)
 
     def test_shared_repo_independent_sessions_and_memory(self):

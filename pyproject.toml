@@ -3,19 +3,23 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "quant-research-harness"
+name = "nullfield"
 version = "0.1.0"
-description = "Shared research projects, notebooks, and skills for existing coding agents"
+description = "Skills and persistent memory for quantitative research with coding agents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/Implied-Capital/nullfield"
+Issues = "https://github.com/Implied-Capital/nullfield/issues"
+
 [project.scripts]
-qr = "quant_research.cli:main"
+nullfield = "nullfield.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-quant_research = ["skills/research/SKILL.md"]
+nullfield = ["skills/research/SKILL.md"]

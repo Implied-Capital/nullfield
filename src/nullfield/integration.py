@@ -14,12 +14,12 @@ def install_skill(agent: str, target: Path | str | None = None, force: bool = Fa
     if target and agent == "both":
         raise ResearchError("Use --target with a single agent, or install both into their default locations.")
     agents = ("codex", "claude") if agent == "both" else (agent,)
-    content = files("quant_research").joinpath("skills/research/SKILL.md").read_text(encoding="utf-8")
-    command = shlex.join([sys.executable, "-m", "quant_research"])
+    content = files("nullfield").joinpath("skills/research/SKILL.md").read_text(encoding="utf-8")
+    command = shlex.join([sys.executable, "-m", "nullfield"])
     content = content.replace(
         "# Research\n",
         "# Research\n\n## Installed CLI\n\n"
-        f"Use `{command}` in place of `qr` in the examples below. This absolute\n"
+        f"Use `{command}` in place of `nullfield` in the examples below. This absolute\n"
         "command works even when the host did not inherit the installation's PATH.\n",
         1,
     )

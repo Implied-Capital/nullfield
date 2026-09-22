@@ -1,4 +1,6 @@
-# Quant Research
+# Nullfield
+
+Skills and persistent memory for quantitative research with coding agents.
 
 A small Python research layer for **Codex and Claude Code**. It provides shared
 research skills, independent projects, and a persistent notebook. Your existing
@@ -12,17 +14,19 @@ Python 3.11+, no runtime dependencies. MIT licensed.
 
 ## Install
 
-From this repository, using Python 3.11 or newer (for example, Python 3.12):
+Clone the repository and install using Python 3.11 or newer (for example, Python 3.12):
 
 ```bash
+git clone https://github.com/Implied-Capital/nullfield.git
+cd nullfield
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-qr --help
+nullfield --help
 ```
 
 For a globally available command, `pipx install .` or `uv tool install .` also
-works. Activate the virtual environment to use `qr` in a terminal. The skill
+works. Activate the virtual environment to use `nullfield` in a terminal. The skill
 installer records the absolute Python command so agents can use the same
 installation even when their PATH differs. Keep that environment in place, or
 reinstall the skill with `--force` after moving the installation.
@@ -30,22 +34,22 @@ reinstall the skill with `--force` after moving the installation.
 ## Create a project
 
 ```bash
-qr project create options-rv \
+nullfield project create options-rv \
   --name 'Options relative value' \
   --objective 'Determine whether the signal survives realistic trading costs.'
 ```
 
-By default the notebook is created at `~/.quant-research/projects/options-rv`.
+By default the notebook is created at `~/.nullfield/projects/options-rv`.
 Use `--path /absolute/notebook/location` to place it anywhere. That directory
 must be new or empty. No repository initialization or code changes are required.
 
 Attach local resources as needed:
 
 ```bash
-qr resource add --project options-rv pricing /path/to/pricing --kind repo
-qr resource add --project options-rv backtesting /path/to/backtesting --kind repo
-qr resource add --project options-rv prices /path/to/prices.parquet --kind dataset
-qr resource add --project options-rv paper https://example.org/paper --kind reference
+nullfield resource add --project options-rv pricing /path/to/pricing --kind repo
+nullfield resource add --project options-rv backtesting /path/to/backtesting --kind repo
+nullfield resource add --project options-rv prices /path/to/prices.parquet --kind dataset
+nullfield resource add --project options-rv paper https://example.org/paper --kind reference
 ```
 
 Resources are named references. Adding one does not copy data, load it into an
@@ -58,7 +62,7 @@ non-Git directories are usable but have no Git provenance snapshot.
 Install the same research skill into one or both agents:
 
 ```bash
-qr skills install --agent both
+nullfield skills install --agent both
 # Or: --agent codex / --agent claude
 ```
 
@@ -86,16 +90,16 @@ and [Claude Code skills](https://code.claude.com/docs/en/skills).
 ## Explicit session selection
 
 ```bash
-qr session start options-rv --agent codex
+nullfield session start options-rv --agent codex
 ```
 
 The JSON result contains a research-session UUID. Pass that UUID with every
 subsequent operation:
 
 ```bash
-qr context --session SESSION_UUID
-qr search --session SESSION_UUID 'transaction costs'
-qr session show SESSION_UUID
+nullfield context --session SESSION_UUID
+nullfield search --session SESSION_UUID 'transaction costs'
+nullfield session show SESSION_UUID
 ```
 
 A research session has an immutable project binding. Another session can use a
@@ -103,11 +107,11 @@ different project in the same working directory. There is no global active
 project, cwd inference, or implicit selection of the latest session. Direct
 scripts may use `--project ALIAS` instead of `--session UUID`.
 
-These UUIDs are **qr session IDs**, not native Codex/Claude session IDs. They
-persist across qr process restarts. The skill carries them in conversation and
+These UUIDs are **nullfield session IDs**, not native Codex/Claude session IDs. They
+persist across nullfield process restarts. The skill carries them in conversation and
 handoff summaries; automatic host lifecycle hooks are not part of this MVP. If
 the association is lost, select a project again or explicitly choose a recorded
-session with `qr session list`. To switch projects, start a new research session.
+session with `nullfield session list`. To switch projects, start a new research session.
 
 ## Studies, runs, and notebook entries
 
@@ -115,19 +119,19 @@ Create a bounded study with a Markdown plan. The example is a planning template,
 not evidence that any strategy works:
 
 ```bash
-qr study create --session SESSION_UUID \
+nullfield study create --session SESSION_UUID \
   --title 'Does the signal survive costs?' --file examples/cost-study.md
 ```
 
 Use the returned study UUID to record a command:
 
 ```bash
-qr run start --session SESSION_UUID --study STUDY_UUID \
+nullfield run start --session SESSION_UUID --study STUDY_UUID \
   --cwd /path/to/backtesting --timeout 300 \
   --input experiment.py --input prices.csv -- python experiment.py
 ```
 
-The command receives normal arguments, not an implicit shell. All qr options
+The command receives normal arguments, not an implicit shell. All nullfield options
 must precede `--`. Input paths are relative to `--cwd`. Each run records:
 
 - The exact command, working directory, time budget, timestamps, and exit status.
@@ -145,11 +149,11 @@ does not mean its scientific conclusion is validated.
 Create a notebook entry after reviewing the evidence:
 
 ```bash
-qr entry add --session SESSION_UUID --study STUDY_UUID \
+nullfield entry add --session SESSION_UUID --study STUDY_UUID \
   --kind finding --title 'The gain disappears under observed spreads' \
   --file finding.md --evidence run:RUN_UUID
 
-qr entry add --session SESSION_UUID --study STUDY_UUID \
+nullfield entry add --session SESSION_UUID --study STUDY_UUID \
   --kind decision --title 'Stop this variant' \
   --body 'The tested fill assumption was too optimistic. Next: inspect execution data.'
 ```
@@ -160,7 +164,7 @@ URL. Run/entry IDs resolve within the selected project. External project evidenc
 can be referenced by file or URL, retaining its original scope in the prose.
 URLs are stored without fetching. Existence checks do not establish scientific validity.
 
-Read records with `qr study read`, `qr entry read`, or `qr run read`, followed by
+Read records with `nullfield study read`, `nullfield entry read`, or `nullfield run read`, followed by
 `--session SESSION_UUID RECORD_UUID`. Each also supports `list`. Metadata commands
 emit JSON; `context` emits Markdown. `--file -` reads Markdown from stdin. Search
 matches all whitespace-separated query words, case-insensitively, across complete
@@ -186,13 +190,13 @@ runs/<uuid>/
 
 Notebook files are the source of research content and can be versioned in Git.
 SQLite stores only local project aliases/paths, resource bindings, and research
-sessions. The registry defaults to `~/.quant-research/registry.sqlite3`; override
-with `QR_HOME` or `qr --home PATH ...` (before the subcommand).
+sessions. The registry defaults to `~/.nullfield/registry.sqlite3`; override
+with `NULLFIELD_HOME` or `nullfield --home PATH ...` (before the subcommand).
 
 To move or clone a notebook:
 
 ```bash
-qr project register options-rv /new/notebook/location
+nullfield project register options-rv /new/notebook/location
 ```
 
 Registration preserves the manifest UUID. Re-registering that UUID updates its
@@ -218,7 +222,7 @@ are not enforced by the runner.
 Provenance is a starting point, not a hermetic reproduction bundle: untracked
 file contents, datasets, environments, and dependencies are not archived. Hashes
 identify declared files at launch but cannot stop another process changing them.
-Run against frozen inputs and code when that matters. If the qr process is
+Run against frozen inputs and code when that matters. If the nullfield process is
 forcibly killed or the machine crashes, a run may remain `running`; inspect its
 logs and process state before retrying. There is no automatic retry of experiments.
 Keep the SQLite registry on a local filesystem; networked/multi-machine coordination

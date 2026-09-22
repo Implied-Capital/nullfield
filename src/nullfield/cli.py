@@ -1,4 +1,4 @@
-"""The qr CLI. Metadata commands emit JSON; context emits a Markdown index."""
+"""The nullfield CLI. Metadata commands emit JSON; context emits a Markdown index."""
 
 from __future__ import annotations
 
@@ -45,9 +45,9 @@ def body(args) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="qr", description="Shared research projects and notebooks for Codex and Claude Code.")
-    root.add_argument("--version", action="version", version=f"qr {__version__}")
-    root.add_argument("--home", type=Path, help="Local registry directory (default: QR_HOME or ~/.quant-research)")
+    root = argparse.ArgumentParser(prog="nullfield", description="Shared research projects and notebooks for Codex and Claude Code.")
+    root.add_argument("--version", action="version", version=f"nullfield {__version__}")
+    root.add_argument("--home", type=Path, help="Local registry directory (default: NULLFIELD_HOME or ~/.nullfield)")
     commands = root.add_subparsers(dest="command", required=True)
 
     projects = commands.add_parser("project", help="Create or register independent research projects").add_subparsers(dest="action", required=True)
@@ -192,10 +192,10 @@ def main(argv: list[str] | None = None) -> int:
             return code if code >= 0 else 128 - code
         return 0
     except (ResearchError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
-        print(f"qr: {exc}", file=sys.stderr)
+        print(f"nullfield: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("qr: interrupted", file=sys.stderr)
+        print("nullfield: interrupted", file=sys.stderr)
         return 130
     finally:
         if store:
