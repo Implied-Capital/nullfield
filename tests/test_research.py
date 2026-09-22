@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -11,6 +12,7 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 from nullfield.experiments import run_experiment
 from nullfield.integration import install_skill
@@ -243,6 +245,47 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(skill.read_text(), "User's custom research skill")
         install_skill("codex", target, force=True)
         self.assertNotEqual(skill.read_text(), "User's custom research skill")
+
+    def test_installed_skill_references_are_present_and_edits_are_preserved(self):
+        target = self.root / "skills"
+        installed = install_skill("codex", target)
+        skill = Path(installed[0])
+        references = re.findall(r"\]\((references/[^)]+)\)", skill.read_text())
+        self.assertTrue(references)
+        for relative in references:
+            reference = skill.parent / relative
+            self.assertIn(str(reference), installed)
+            self.assertTrue(reference.read_text().strip())
+        reference = skill.parent / references[0]
+        original = reference.read_text()
+        reference.write_text("My local research methods")
+        skill.unlink()
+        custom = skill.parent / "personal-notes.md"
+        custom.write_text("Keep this user's file")
+        with self.assertRaises(ResearchError):
+            install_skill("claude", target)
+        self.assertFalse(skill.exists(), "Conflict check must precede entrypoint creation")
+        self.assertEqual(reference.read_text(), "My local research methods")
+        install_skill("claude", target, force=True)
+        self.assertEqual(reference.read_text(), original)
+        self.assertEqual(custom.read_text(), "Keep this user's file")
+        self.assertTrue(skill.is_file())
+
+    def test_both_hosts_are_checked_before_installing_either_bundle(self):
+        home = self.root / "user-home"
+        claude_target = home / ".claude/skills"
+        installed = install_skill("claude", claude_target)
+        reference = next(Path(path) for path in installed if Path(path).parent.name == "references")
+        reference.write_text("Local changes")
+        with patch("nullfield.integration.Path.home", return_value=home):
+            with self.assertRaises(ResearchError):
+                install_skill("both")
+            self.assertFalse((home / ".agents").exists())
+            self.assertEqual(reference.read_text(), "Local changes")
+            paths = install_skill("both", force=True)
+        self.assertTrue(all(Path(path).is_file() for path in paths))
+        self.assertEqual(len(paths), 2 * len(installed))
+        self.assertEqual((home / ".agents/skills/research/references" / reference.name).read_text(), reference.read_text())
 
 
 if __name__ == "__main__":

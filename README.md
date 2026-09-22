@@ -67,10 +67,12 @@ nullfield skills install --agent both
 ```
 
 This writes the shared skill with its local CLI command into `research/SKILL.md`
+and its method references into `research/references/`,
 under `~/.agents/skills` for Codex and
 `~/.claude/skills` for Claude Code. `--target /path/to/skills` overrides the
-destination for a single agent. It preserves a different existing skill unless
-you explicitly pass `--force`. No host configuration files are modified.
+destination for a single agent. It checks all bundled files for local changes
+before writing and preserves them unless you explicitly pass `--force`.
+Additional user-created files are left in place. No host configuration files are modified.
 
 Then invoke it in your existing agent:
 
@@ -83,6 +85,23 @@ Ask it to continue a named study or investigate a question. The skill selects
 the project, reads its brief and notebook index, searches relevant prior work,
 and records experiments and conclusions. Only the matching skill body is loaded
 by the host. The notebook context is an index; prior evidence is retrieved on demand.
+
+The skill emphasizes measurement validity, competing explanations, simple
+baselines, and exact agreement between tested and implemented behavior. It loads
+deeper guidance when relevant:
+
+- [Experiment design](src/nullfield/skills/research/references/experiment-design.md):
+  meaningful comparisons, evaluation exposure, bounded search, and stopping decisions.
+- [Measurement and validation](src/nullfield/skills/research/references/measurement-validation.md):
+  input quality, economic accounting, executable prices, dependence, and portfolio feasibility.
+- [Model-assisted measurement](src/nullfield/skills/research/references/model-measurement.md):
+  historical information boundaries, evidence selection, and controls for model evaluations.
+- [Research records](src/nullfield/skills/research/references/research-records.md):
+  scoped findings, reproducible evidence, corrections, negative results, and handoffs.
+
+These are research instructions followed by the host agent, not checks enforced
+by the Python runner. Private hypotheses and strategy details belong in the
+project notebook; the shared skill contains general methods.
 
 Host integration references: [Codex skills](https://learn.chatgpt.com/docs/build-skills)
 and [Claude Code skills](https://code.claude.com/docs/en/skills).

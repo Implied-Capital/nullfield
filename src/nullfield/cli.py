@@ -129,7 +129,7 @@ def parser() -> argparse.ArgumentParser:
     install = skills.add_parser("install")
     install.add_argument("--agent", choices=("codex", "claude", "both"), required=True)
     install.add_argument("--target", type=Path, help="Override the host's skills parent directory")
-    install.add_argument("--force", action="store_true", help="Replace an existing different SKILL.md")
+    install.add_argument("--force", action="store_true", help="Replace locally modified files from the packaged research skill")
     return root
 
 
