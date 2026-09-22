@@ -211,23 +211,6 @@ Record files remain editable by humans; the CLI does not rewrite old entries.
 Use a new linked entry to supersede an earlier conclusion. Simultaneous direct
 edits to the same Markdown file still need normal collaboration/version control.
 
-## Scope of the MVP
-
-This is a local filesystem tool, not an agent framework. It has no model API,
-background scheduler, vector database, web service, host launcher, automatic
-host-session binding, or automatic statistical validation. Skills guide research
-judgment; code records identity and evidence. Holdout access and study schemas
-are not enforced by the runner.
-
-Provenance is a starting point, not a hermetic reproduction bundle: untracked
-file contents, datasets, environments, and dependencies are not archived. Hashes
-identify declared files at launch but cannot stop another process changing them.
-Run against frozen inputs and code when that matters. If the nullfield process is
-forcibly killed or the machine crashes, a run may remain `running`; inspect its
-logs and process state before retrying. There is no automatic retry of experiments.
-Keep the SQLite registry on a local filesystem; networked/multi-machine coordination
-is outside this version's scope.
-
 ## Develop and try an isolated example
 
 ```bash
