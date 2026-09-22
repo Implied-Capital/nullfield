@@ -22,8 +22,10 @@ qr --help
 ```
 
 For a globally available command, `pipx install .` or `uv tool install .` also
-works. The agent must be able to invoke `qr`; when using a virtual environment,
-launch the agent from the activated environment or add its bin directory to PATH.
+works. Activate the virtual environment to use `qr` in a terminal. The skill
+installer records the absolute Python command so agents can use the same
+installation even when their PATH differs. Keep that environment in place, or
+reinstall the skill with `--force` after moving the installation.
 
 ## Create a project
 
@@ -60,7 +62,8 @@ qr skills install --agent both
 # Or: --agent codex / --agent claude
 ```
 
-This writes `research/SKILL.md` into `~/.agents/skills` for Codex and
+This writes the shared skill with its local CLI command into `research/SKILL.md`
+under `~/.agents/skills` for Codex and
 `~/.claude/skills` for Claude Code. `--target /path/to/skills` overrides the
 destination for a single agent. It preserves a different existing skill unless
 you explicitly pass `--force`. No host configuration files are modified.
