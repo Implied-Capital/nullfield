@@ -13,8 +13,8 @@ from . import __version__
 from .experiments import run_experiment
 from .integration import install_skill
 from .ledger import PURPOSES, ROLES, define_sample, list_samples, record_use, show_sample
-from .store import (ResearchError, Store, add_entry, context, create_study,
-                    get_record, list_records, search)
+from .store import (STUDY_STATES, ResearchError, Store, add_entry, annotate, context,
+                    create_study, get_record, list_records, search)
 
 
 def positive(value: str) -> int:
@@ -115,6 +115,10 @@ def parser() -> argparse.ArgumentParser:
     text_flags(entry)
     entry.add_argument("--study")
     entry.add_argument("--evidence", action="append", default=[], help="Repeatable: run:UUID, entry:UUID, URL, or file")
+    entry.add_argument("--supersedes", action="append", default=[],
+                       help="Repeatable entry ID this entry replaces as the current word: a correction, reversal, or answer")
+    entry.add_argument("--study-state", choices=STUDY_STATES,
+                       help="With --kind decision and --study: set the study's state")
     scope_flags(entries.add_parser("list"))
     read = entries.add_parser("read")
     scope_flags(read)
@@ -195,7 +199,8 @@ def dispatch(store: Store, args):
     if args.command == "study" and args.action == "create":
         return create_study(project, args.title, body(args))
     if args.command == "entry" and args.action == "add":
-        return add_entry(project, args.kind, args.title, body(args), args.study, args.evidence)
+        return add_entry(project, args.kind, args.title, body(args), args.study, args.evidence,
+                         args.supersedes, args.study_state)
     if args.command == "run" and args.action == "start":
         argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
         return run_experiment(project, args.study, argv, args.cwd, args.timeout, args.input, store.resources(project),
@@ -210,8 +215,8 @@ def dispatch(store: Store, args):
         return record_use(project, args.name, args.purpose, args.study, args.date, args.note, args.acknowledge_conflicts)
     collection = {"study": "studies", "entry": "entries", "run": "runs"}[args.command]
     if args.action == "list":
-        return list_records(project, collection)
-    record = get_record(project, collection, args.id)
+        return annotate(project, collection, list_records(project, collection))
+    [record] = annotate(project, collection, [get_record(project, collection, args.id)])
     if args.command != "run":
         filename = "plan.md" if args.command == "study" else "note.md"
         record["body"] = (Path(record["path"]) / filename).read_text(encoding="utf-8")

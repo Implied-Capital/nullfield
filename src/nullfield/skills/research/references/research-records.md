@@ -53,10 +53,11 @@ number from memory. If a number cannot be traced to a matching run, mark it
 unverified. A corrected interpretation can be valuable even when it closes
 the original hypothesis.
 
-Nullfield currently has no dedicated supersession field. Use a linked entry
-with an appropriate kind and an explicit status in the text; update the brief
-with the current conclusion and its reference while retaining the older record.
-When retrieving findings, look for later corrections as well as supporting notes.
+Record it with `--supersedes` pointing at the entry it replaces; the older
+record is retained and reported as superseded. Supersession marks which entry
+is the current word, not which evidence was reused: cite still-valid earlier
+entries as evidence rather than superseding them. When retrieving findings,
+check `superseded_by` and read the replacement before relying on a result.
 
 ## A decision and continuation
 

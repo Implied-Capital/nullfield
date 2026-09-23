@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -17,7 +18,7 @@ from unittest.mock import patch
 from nullfield.experiments import run_experiment
 from nullfield.integration import install_skill
 from nullfield.ledger import define_sample, get_sample, list_samples, record_use, show_sample
-from nullfield.store import (ResearchError, Store, add_entry, context,
+from nullfield.store import (ResearchError, Store, add_entry, annotate, context,
                                  create_study, get_record, list_records, search)
 
 
@@ -234,6 +235,54 @@ class ResearchTests(unittest.TestCase):
             self.assertEqual(len(code["commit"]), 40)
             expected = 2 if Path(code["root"]).name == "one" else 3
             self.assertIn(f"+baseline = {expected}", (Path(result["path"]) / code["tracked_patch"]).read_text())
+
+    def test_supersession_is_recorded_on_the_new_entry_and_derived_for_the_old(self):
+        original = add_entry(self.alpha, "finding", "Blend Sharpe 4.55", "Informal note.", None, ["https://example.org/a"])
+        note = Path(original["path"]) / "note.md"
+        before = (note.read_bytes(), (Path(original["path"]) / "record.json").read_bytes())
+        correction = add_entry(self.alpha, "finding", "Blend Sharpe is 4.46", "Corrected.", None,
+                               [f"entry:{original['id']}"], [f"entry:{original['id']}", original["id"]])
+        self.assertEqual(correction["supersedes"], [original["id"]])
+        self.assertEqual(before, (note.read_bytes(), (Path(original["path"]) / "record.json").read_bytes()),
+                         "Superseding must not rewrite the earlier entry")
+        [found] = [r for r in search(self.alpha, "4.55") if r["id"] == original["id"]]
+        self.assertEqual(found["superseded_by"], [correction["id"]])
+        self.assertIn(f"[finding; superseded by {correction['id']}] Blend Sharpe 4.55", context(self.store, self.alpha, None))
+        read = json.loads(self.cli("entry", "read", "--project", "alpha", original["id"]).stdout)
+        self.assertEqual(read["superseded_by"], [correction["id"]])
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "observation", "Bad link", "Body", None, [], [str(uuid.uuid4())])
+        other = add_entry(self.beta, "observation", "Beta note", "Body", None, [])
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "observation", "Cross-project", "Body", None, [], [other["id"]])
+
+    def test_study_state_is_set_by_decisions_and_open_work_is_listed(self):
+        study = create_study(self.alpha, "Exit rules", "Plan")
+        other = create_study(self.alpha, "Blend", "Plan")
+        question = add_entry(self.alpha, "question", "Does loser mean reversion pay?", "Untested.", study["id"], [])
+        answered = add_entry(self.alpha, "question", "Is 0.12 bounce enough?", "Unknown.", None, [])
+        add_entry(self.alpha, "finding", "Bounce 0.16-0.27", "Measured.", None, ["https://example.org/b"], [answered["id"]])
+        for i in range(12):
+            add_entry(self.alpha, "observation", f"Filler {i}", "Body", None, [])
+        text = context(self.store, self.alpha, None, limit=3)
+        self.assertIn("## Open studies (all 2)", text)
+        self.assertIn(question["id"], text, "Open questions are listed beyond the recent-record limit")
+        self.assertNotIn(answered["id"], text.split("## Recent")[0])
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "finding", "Not a decision", "Body", study["id"], ["https://example.org/c"], [], "concluded")
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "decision", "No study", "Body", None, [], [], "concluded")
+        close = add_entry(self.alpha, "decision", "Stop exit rules", "Holdout failed.", study["id"], [], [], "concluded")
+        [state] = annotate(self.alpha, "studies", [get_record(self.alpha, "studies", study["id"])])
+        self.assertEqual((state["state"], state["decision"]), ("concluded", close["id"]))
+        self.assertIn("## Open studies (all 1)", context(self.store, self.alpha, None))
+        # A correction that supersedes the closing decision without restating a state reopens the study.
+        add_entry(self.alpha, "decision", "Closing rationale was wrong", "Rerun needed.", study["id"], [], [close["id"]])
+        [state] = annotate(self.alpha, "studies", [get_record(self.alpha, "studies", study["id"])])
+        self.assertEqual(state["state"], "open")
+        add_entry(self.alpha, "decision", "Abandon blend", "Not deployable.", other["id"], [], [], "abandoned")
+        states = {r["id"]: r["state"] for r in json.loads(self.cli("study", "list", "--project", "alpha").stdout)}
+        self.assertEqual(states, {study["id"]: "open", other["id"]: "abandoned"})
 
     def define_eras(self):
         define_sample(self.alpha, "fit-era", "labels", "2019-01-01", "2022-12-31", "development", "")

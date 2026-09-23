@@ -174,8 +174,21 @@ nullfield entry add --session SESSION_UUID --study STUDY_UUID \
 
 nullfield entry add --session SESSION_UUID --study STUDY_UUID \
   --kind decision --title 'Stop this variant' \
-  --body 'The tested fill assumption was too optimistic. Next: inspect execution data.'
+  --body 'The tested fill assumption was too optimistic. Next: inspect execution data.' \
+  --study-state concluded
+
+nullfield entry add --session SESSION_UUID --kind finding \
+  --title 'Corrected cost estimate' --file correction.md \
+  --evidence run:RUN_UUID --supersedes ENTRY_UUID
 ```
+
+Studies start `open`. A decision entry with `--study` and `--study-state
+concluded|abandoned|open` sets the study's state; the latest decision that has
+not been superseded determines it. `--supersedes` (repeatable) marks an earlier
+entry as replaced by the new one: a correction replaces a finding, an answer
+replaces a question. Nothing is rewritten; `read`, `list`, and `search` report
+`superseded_by` for entries and `state` for studies. `context` lists every open
+study and every unanswered question regardless of `--limit`.
 
 Entry kinds: `observation`, `finding`, `decision`, `question`. Findings require
 at least one evidence reference: `run:UUID`, `entry:UUID`, a file, or an HTTP(S)
@@ -279,7 +292,7 @@ replacement with durable URLs when sharing across machines.
 Records have unique directories and atomically replaced metadata files. SQLite
 serializes registry writes. Separate local agents can append entries concurrently.
 Record files remain editable by humans; the CLI does not rewrite old entries.
-Use a new linked entry to supersede an earlier conclusion. Simultaneous direct
+Use a new entry with `--supersedes` to replace an earlier conclusion. Simultaneous direct
 edits to the same Markdown file still need normal collaboration/version control.
 
 ## Develop and try an isolated example
