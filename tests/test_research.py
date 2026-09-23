@@ -265,7 +265,7 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(len(list_records(self.alpha, "uses")), 2, "A refused use must not be written")
         reused = record_use(self.alpha, "holdout", "evaluate", confirm["id"], None, "", True)
         self.assertEqual(len(reused["acknowledged_conflicts"]), 2)
-        self.assertIn("used: evaluate 3", context(self.store, self.alpha, None))
+        self.assertIn("own: evaluate 3; latest", context(self.store, self.alpha, None))
 
     def test_fitting_or_inspecting_a_holdout_spends_it(self):
         self.define_eras()
@@ -288,7 +288,11 @@ class ResearchTests(unittest.TestCase):
         later = create_study(self.alpha, "Optimizer", "Evaluate 2023-26.")
         with self.assertRaisesRegex(ResearchError, "via overlapping sample l4-holdout"):
             record_use(self.alpha, "holdout", "evaluate", later["id"], None, "", False)
-        self.assertEqual(show_sample(self.alpha, "holdout")["status"]["overlapping_uses"], 1)
+        state = show_sample(self.alpha, "holdout")["status"]
+        self.assertEqual((state["uses"], state["by_purpose"]), (0, {}))
+        self.assertEqual(state["overlapping_by_purpose"], {"evaluate": 1})
+        self.assertIn("holdout [holdout] labels 2023-01-01 → 2026-05-21 — own: none; "
+                      "via overlapping samples: evaluate 1; latest 2026-07-04", context(self.store, self.alpha, None))
         self.assertEqual(show_sample(self.alpha, "fresh")["status"]["state"], "unused")
         self.assertEqual(show_sample(self.alpha, "other-data")["status"]["state"], "unused")
         record_use(self.alpha, "other-data", "evaluate", later["id"], None, "", False)
