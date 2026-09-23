@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nullfield"
 version = "0.1.0"
-description = "Skills and persistent memory for quantitative research with coding agents"
+description = "A research notebook for coding agents: pre-registered studies, recorded runs, and an evaluation-data ledger"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
