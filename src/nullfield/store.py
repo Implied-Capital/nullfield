@@ -315,6 +315,9 @@ def annotate(project: dict, collection: str, records: list[dict]) -> list[dict]:
     if collection == "studies":
         states = study_states(entries)
         return [{**r, **states.get(r["id"], {"state": "open", "decision": None})} for r in records]
+    if collection == "runs":
+        from .experiments import run_state  # Liveness needs the runner's process helpers.
+        return [{**r, "state": run_state(r)} for r in records]
     return records
 
 
@@ -355,7 +358,8 @@ def context(store: Store, project: dict, session_id: str | None, limit: int = 10
     lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in open_studies)
     lines.extend(["", f"## Open questions (all {len(questions)})"])
     lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in questions)
-    for collection, records in (("studies", studies), ("entries", entries), ("runs", list_records(project, "runs"))):
+    runs = annotate(project, "runs", list_records(project, "runs"))
+    for collection, records in (("studies", studies), ("entries", entries), ("runs", runs)):
         lines.extend(["", f"## Recent {collection} ({min(limit, len(records))} of {len(records)})"])
         for record in records[:limit]:
             label = record.get("title") or " ".join(record["command"])
