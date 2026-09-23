@@ -156,8 +156,15 @@ must precede `--`. Input paths are relative to `--cwd`. Each run records:
 - The exact command, working directory, time budget, timestamps, and exit status.
 - A copy and SHA-256 digest of the study plan before execution.
 - SHA-256 digests of the explicitly declared input files.
-- Git heads and tracked patches for the working directory and attached repo resources.
-- Separate stdout and stderr files.
+- Git heads and tracked text patches for the working directory and attached repo
+  resources. Changed binary files are recorded by path, SHA-256, and size rather
+  than stored, since their bytes dominate patch size.
+- Separate stdout and stderr files, and a `stderr_summary`: line and warning counts,
+  whether a traceback occurred, and the most repeated lines, for quick triage.
+- Declared outputs (`--output PATH`, repeatable; files or directories, relative to
+  `--cwd`): fingerprinted after the command finishes, with missing ones flagged.
+  Output files that fit the `--keep-mb` budget (default 5) are copied into the
+  run's `outputs/` directory, so small results travel with the notebook.
 
 Failures, missing executables, interruptions, and timeouts produce run records
 too. The CLI propagates the command's exit code (124 for timeout, 130 for an
@@ -217,7 +224,9 @@ can be referenced by file or URL, retaining its original scope in the prose.
 URLs are stored without fetching. Existence checks do not establish scientific validity.
 
 Read records with `nullfield study read`, `nullfield entry read`, or `nullfield run read`, followed by
-`--session SESSION_UUID RECORD_UUID`. Each also supports `list`. Metadata commands
+`--session SESSION_UUID RECORD_UUID`. Each also supports `list`. Anywhere a record or
+session ID is accepted, a unique prefix of at least 8 characters works too; stored
+references always use the full ID. Metadata commands
 emit JSON; `context` emits Markdown. `--file -` reads Markdown from stdin. Search
 matches all whitespace-separated query words, case-insensitively, across complete
 entry bodies and study plans. It includes older and negative results.

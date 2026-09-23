@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,6 +22,55 @@ def fingerprint(path: Path) -> dict:
     return {"path": str(path), "sha256": digest, "bytes": path.stat().st_size}
 
 
+def resolve(cwd: Path, value: str) -> Path:
+    path = Path(value).expanduser()
+    return (cwd / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def collect_outputs(run_dir: Path, record: dict) -> list[dict]:
+    """Fingerprint every declared output file; copy files that fit the run's keep budget."""
+    budget, cwd, results = record.get("output_keep_bytes", 0), Path(record["cwd"]), []
+    for index, declared in enumerate(record.get("declared_outputs", [])):
+        root = Path(declared)
+        if not root.exists():
+            results.append({"path": declared, "missing": True})
+            continue
+        files = [root] if root.is_file() else sorted(f for f in root.rglob("*") if f.is_file())
+        for file in files[:MAX_OUTPUT_FILES]:
+            entry = {**fingerprint(file), "kept": None}
+            if entry["bytes"] <= budget:
+                try:
+                    relative = Path("outputs") / file.relative_to(cwd)
+                except ValueError:
+                    relative = Path("outputs") / f"external-{index:02d}" / file.relative_to(root.parent)
+                (run_dir / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(file, run_dir / relative)
+                budget -= entry["bytes"]
+                entry["kept"] = str(relative)
+            results.append(entry)
+        if len(files) > MAX_OUTPUT_FILES:
+            results.append({"path": declared, "files_not_recorded": len(files) - MAX_OUTPUT_FILES})
+    return results
+
+
+def summarize_stderr(path: Path, top: int = 5) -> dict:
+    """Line counts, warnings, tracebacks, and the most repeated lines, for triage."""
+    counts: dict[str, int] = {}
+    lines = warnings = 0
+    traceback = False
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            text = line.strip()
+            lines += 1
+            warnings += "Warning" in text
+            traceback = traceback or text.startswith("Traceback (most recent call last)")
+            if text:
+                counts[text[:300]] = counts.get(text[:300], 0) + 1
+    repeated = sorted(((n, text) for text, n in counts.items() if n > 1), reverse=True)[:top]
+    return {"lines": lines, "warning_lines": warnings, "traceback": traceback,
+            "most_repeated": [{"count": n, "line": text} for n, text in repeated]}
+
+
 def git_snapshot(cwd: Path, destination: Path) -> dict | None:
     def git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, timeout=30)
@@ -32,17 +82,30 @@ def git_snapshot(cwd: Path, destination: Path) -> dict | None:
     if root.returncode:
         return None
     head = git("rev-parse", "HEAD")
-    # Diff against HEAD includes both staged and unstaged tracked edits.
-    patch = git("diff", "--binary", "HEAD") if not head.returncode else git("diff", "--binary", "--cached")
-    if patch.returncode:
-        raise ResearchError(f"Cannot capture Git state in {cwd}: {patch.stderr.decode(errors='replace')}")
+    # Diff against HEAD includes both staged and unstaged tracked edits. Text changes are
+    # stored as a patch; binary changes are fingerprinted, since their bytes dominate size.
+    base = ["HEAD"] if not head.returncode else ["--cached"]
+    patch = git("diff", "--no-renames", *base)
+    numstat = git("diff", "--no-renames", "--numstat", "-z", *base)
+    if patch.returncode or numstat.returncode:
+        error = (patch.stderr or numstat.stderr).decode(errors="replace")
+        raise ResearchError(f"Cannot capture Git state in {cwd}: {error}")
     destination.write_bytes(patch.stdout)
+    top = Path(root.stdout.decode().strip())
+    binary = []
+    for item in numstat.stdout.decode(errors="replace").split("\0"):
+        added, _, rest = item.partition("\t")
+        if added != "-":
+            continue
+        name = rest.partition("\t")[2]
+        file = top / name
+        binary.append({**fingerprint(file), "path": name} if file.is_file() else {"path": name, "deleted": True})
     status = git("status", "--porcelain=v1", "--untracked-files=normal")
     if status.returncode:
         raise ResearchError(f"Cannot inspect Git working tree: {cwd}")
     return {"root": root.stdout.decode().strip(), "commit": head.stdout.decode().strip() if not head.returncode else None,
             "status": status.stdout.decode(errors="replace"), "tracked_patch": destination.name,
-            "untracked_contents_captured": False}
+            "binary_changes": binary, "untracked_contents_captured": False}
 
 
 def terminate(process: subprocess.Popen) -> None:
@@ -68,24 +131,31 @@ def terminate(process: subprocess.Popen) -> None:
     process.wait()
 
 
+DEFAULT_KEEP_BYTES = 5 * 1024 * 1024
+MAX_OUTPUT_FILES = 10_000
+
+
 def run_experiment(project: dict, study_id: str, command: list[str], cwd: Path | str,
                    timeout: int, inputs: list[str], resources: list[dict],
                    samples: list[tuple[str, str]] = (), acknowledge: bool = False,
-                   detach: bool = False) -> dict:
-    path = prepare_run(project, study_id, command, cwd, timeout, inputs, resources, samples, acknowledge)
+                   detach: bool = False, outputs: list[str] = (), keep_bytes: int = DEFAULT_KEEP_BYTES) -> dict:
+    path = prepare_run(project, study_id, command, cwd, timeout, inputs, resources, samples, acknowledge,
+                       outputs, keep_bytes)
     record = launch_supervisor(path) if detach else execute(path)
     return {**record, "path": str(path)}
 
 
 def prepare_run(project: dict, study_id: str, command: list[str], cwd: Path | str,
                 timeout: int, inputs: list[str], resources: list[dict],
-                samples: list[tuple[str, str]], acknowledge: bool) -> Path:
+                samples: list[tuple[str, str]], acknowledge: bool,
+                outputs: list[str] = (), keep_bytes: int = DEFAULT_KEEP_BYTES) -> Path:
     """Validate, capture provenance, and write a running record; nothing is launched yet."""
     if not command:
         raise ResearchError("Supply a command after --.")
     if timeout <= 0:
         raise ResearchError("Timeout must be positive.")
     study = get_record(project, "studies", study_id)
+    study_id = study["id"]
     # Check the ledger before any record exists: a refused run leaves no trace.
     started_on = today()
     planned_uses = check_uses(project, list(samples), study_id, started_on, acknowledge)
@@ -94,8 +164,7 @@ def prepare_run(project: dict, study_id: str, command: list[str], cwd: Path | st
         raise ResearchError(f"Working directory does not exist: {cwd}")
     fingerprints = []
     for value in inputs:
-        path = Path(value).expanduser()
-        path = (cwd / path).resolve() if not path.is_absolute() else path.resolve()
+        path = resolve(cwd, value)
         if not path.is_file():
             raise ResearchError(f"Input must be an existing file: {path}")
         fingerprints.append(fingerprint(path))
@@ -122,7 +191,9 @@ def prepare_run(project: dict, study_id: str, command: list[str], cwd: Path | st
               "timeout_seconds": timeout, "inputs": fingerprints, "code": code,
               "plan_sha256": hashlib.sha256(plan).hexdigest(),
               "stdout": "stdout.log", "stderr": "stderr.log",
-              "returncode": None, "finished_at": None, "runner_pid": None}
+              "returncode": None, "finished_at": None, "runner_pid": None,
+              "declared_outputs": [str(resolve(cwd, value)) for value in outputs],
+              "output_keep_bytes": max(keep_bytes, 0)}
     # Uses are recorded before launch: a command that starts may read outcomes even if it fails.
     record["sample_uses"] = [write_use(project, sample, purpose, study_id, run_id, started_on, "", reasons)["id"]
                              for sample, purpose, reasons in planned_uses]
@@ -169,6 +240,13 @@ def execute(path: Path) -> dict:
     finally:
         if handler is not None:
             signal.signal(signal.SIGTERM, handler)
+    # Evidence collection must never leave the record unfinished.
+    for key, collect in (("outputs", lambda: collect_outputs(path, record)),
+                         ("stderr_summary", lambda: summarize_stderr(path / "stderr.log"))):
+        try:
+            record[key] = collect()
+        except OSError as exc:
+            record[key] = {"error": str(exc)}
     record["finished_at"] = now()
     write_json(path / "record.json", record)
     return record
@@ -214,6 +292,7 @@ def run_state(record: dict) -> str:
 
 
 def wait_run(project: dict, run_id: str, timeout: float | None) -> dict:
+    run_id = get_record(project, "runs", run_id)["id"]
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
         record = get_record(project, "runs", run_id)

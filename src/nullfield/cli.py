@@ -163,6 +163,11 @@ def parser() -> argparse.ArgumentParser:
                      help="Repeatable SAMPLE:PURPOSE the command reads; recorded in the ledger before launch")
     run.add_argument("--acknowledge-conflicts", action="store_true",
                      help="Run even though the ledger shows prior use or a spent holdout")
+    run.add_argument("--output", action="append", default=[], dest="outputs",
+                     help="Repeatable file or directory the command writes; relative to --cwd. Fingerprinted after "
+                          "the run; files that fit --keep-mb are copied into the run record")
+    run.add_argument("--keep-mb", type=float, default=5.0,
+                     help="Total size of declared outputs copied into the run record (default 5; 0 copies none)")
     run.add_argument("--detach", action="store_true",
                      help="Return once a background supervisor has started the command; use run wait/stop")
     run.add_argument("argv", nargs=argparse.REMAINDER, help="Command and arguments after --; no implicit shell")
@@ -220,7 +225,8 @@ def dispatch(store: Store, args):
     if args.command == "run" and args.action == "start":
         argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
         return run_experiment(project, args.study, argv, args.cwd, args.timeout, args.input, store.resources(project),
-                              args.samples, args.acknowledge_conflicts, args.detach)
+                              args.samples, args.acknowledge_conflicts, args.detach,
+                              args.outputs, int(args.keep_mb * 1024 * 1024))
     if args.command == "run" and args.action == "wait":
         return wait_run(project, args.id, args.timeout)
     if args.command == "run" and args.action == "stop":
@@ -241,7 +247,7 @@ def dispatch(store: Store, args):
         filename = "plan.md" if args.command == "study" else "note.md"
         record["body"] = (Path(record["path"]) / filename).read_text(encoding="utf-8")
     if args.command == "study":
-        record["freeze_history"] = study_freezes(project, args.id)
+        record["freeze_history"] = study_freezes(project, record["id"])
     return record
 
 

@@ -137,9 +137,16 @@ and a realistic `--timeout`, then `nullfield run wait --session UUID RUN_UUID
 exits 3 (still running). Report launched-but-unfinished runs as running, never
 as results. Use `nullfield run stop` to abandon one; a `lost` run's runner died
 and its output is incomplete.
-The runner records Git heads and tracked patches, but does not archive untracked
-code, dependencies, or datasets. Add important files as `--input` to fingerprint
-them; preserve source artifacts separately when reproduction requires it.
+
+Declare what the command writes with `--output PATH` (repeatable); results are
+fingerprinted after the run and small files are copied into the run record, so
+cite `run:UUID` rather than a bare output path. Check `stderr_summary` in
+`run read` before trusting a result: tracebacks and repeated warnings show up
+there. The runner records Git heads, tracked text patches, and fingerprints of
+changed binary files, but does not archive untracked code, dependencies, or
+datasets. Add important files as `--input` to fingerprint them; preserve source
+artifacts separately when reproduction requires it. Record IDs accept unique
+prefixes of 8 or more characters.
 
 ## Preregistration
 
