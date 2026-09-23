@@ -8,6 +8,7 @@ import signal
 import subprocess
 from pathlib import Path
 
+from .ledger import check_uses, today, write_use
 from .store import ResearchError, get_record, new_id, now, record_path, write_json
 
 
@@ -65,12 +66,16 @@ def terminate(process: subprocess.Popen) -> None:
 
 
 def run_experiment(project: dict, study_id: str, command: list[str], cwd: Path | str,
-                   timeout: int, inputs: list[str], resources: list[dict]) -> dict:
+                   timeout: int, inputs: list[str], resources: list[dict],
+                   samples: list[tuple[str, str]] = (), acknowledge: bool = False) -> dict:
     if not command:
         raise ResearchError("Supply a command after --.")
     if timeout <= 0:
         raise ResearchError("Timeout must be positive.")
     study = get_record(project, "studies", study_id)
+    # Check the ledger before any record exists: a refused run leaves no trace.
+    started_on = today()
+    planned_uses = check_uses(project, list(samples), study_id, started_on, acknowledge)
     cwd = Path(cwd).expanduser().resolve()
     if not cwd.is_dir():
         raise ResearchError(f"Working directory does not exist: {cwd}")
@@ -105,6 +110,9 @@ def run_experiment(project: dict, study_id: str, command: list[str], cwd: Path |
               "plan_sha256": hashlib.sha256(plan).hexdigest(),
               "stdout": "stdout.log", "stderr": "stderr.log",
               "returncode": None, "finished_at": None}
+    # Uses are recorded before launch: a command that starts may read outcomes even if it fails.
+    record["sample_uses"] = [write_use(project, sample, purpose, study_id, run_id, started_on, "", reasons)["id"]
+                             for sample, purpose, reasons in planned_uses]
     write_json(path / "record.json", record)
     with (path / "stdout.log").open("wb") as stdout, (path / "stderr.log").open("wb") as stderr:
         try:

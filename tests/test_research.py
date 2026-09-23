@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from nullfield.experiments import run_experiment
 from nullfield.integration import install_skill
+from nullfield.ledger import define_sample, get_sample, list_samples, record_use, show_sample
 from nullfield.store import (ResearchError, Store, add_entry, context,
                                  create_study, get_record, list_records, search)
 
@@ -233,6 +234,109 @@ class ResearchTests(unittest.TestCase):
             self.assertEqual(len(code["commit"]), 40)
             expected = 2 if Path(code["root"]).name == "one" else 3
             self.assertIn(f"+baseline = {expected}", (Path(result["path"]) / code["tracked_patch"]).read_text())
+
+    def define_eras(self):
+        define_sample(self.alpha, "fit-era", "labels", "2019-01-01", "2022-12-31", "development", "")
+        define_sample(self.alpha, "holdout", "labels", "2023-01-01", "2026-05-21", "holdout", "")
+        define_sample(self.alpha, "fresh", "labels", "2026-05-22", None, "holdout", "Open-ended")
+
+    def test_samples_are_immutable_and_validated(self):
+        self.define_eras()
+        with self.assertRaises(ResearchError):
+            define_sample(self.alpha, "holdout", "labels", "2020-01-01", None, "holdout", "Redefinition")
+        with self.assertRaises(ResearchError):
+            define_sample(self.alpha, "backwards", "labels", "2024-01-01", "2023-01-01", "development", "")
+        with self.assertRaises(ResearchError):
+            define_sample(self.alpha, "bad-date", "labels", "2024-13-01", None, "development", "")
+        with self.assertRaises(ResearchError):
+            get_sample(self.beta, "holdout")
+        self.assertEqual([s["name"] for s in list_samples(self.alpha)], ["fit-era", "holdout", "fresh"])
+
+    def test_evaluating_a_used_sample_is_refused_without_acknowledgement(self):
+        self.define_eras()
+        selection = create_study(self.alpha, "Pick a profile", "Compare profiles on the holdout.")
+        confirm = create_study(self.alpha, "Confirm the profile", "Evaluate the chosen profile.")
+        first = record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-08-06", "", False)
+        self.assertEqual(first["acknowledged_conflicts"], [])
+        # The same study repeating its own evaluation is not prior use by someone else.
+        record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-08-07", "", False)
+        with self.assertRaisesRegex(ResearchError, first["id"]):
+            record_use(self.alpha, "holdout", "evaluate", confirm["id"], None, "", False)
+        self.assertEqual(len(list_records(self.alpha, "uses")), 2, "A refused use must not be written")
+        reused = record_use(self.alpha, "holdout", "evaluate", confirm["id"], None, "", True)
+        self.assertEqual(len(reused["acknowledged_conflicts"]), 2)
+        self.assertIn("used: evaluate 3", context(self.store, self.alpha, None))
+
+    def test_fitting_or_inspecting_a_holdout_spends_it(self):
+        self.define_eras()
+        study = create_study(self.alpha, "Explore", "Look at everything.")
+        with self.assertRaisesRegex(ResearchError, "holdout sample holdout"):
+            record_use(self.alpha, "holdout", "inspect", study["id"], None, "", False)
+        # A pooled development sample that overlaps a holdout spends it too.
+        define_sample(self.alpha, "pooled", "labels", "2019-01-01", "2026-12-31", "development", "")
+        with self.assertRaisesRegex(ResearchError, "holdout sample fresh, which overlaps pooled"):
+            record_use(self.alpha, "pooled", "fit", study["id"], None, "", False)
+        record_use(self.alpha, "fit-era", "fit", study["id"], None, "", False)
+
+    def test_overlapping_samples_share_history_within_a_dataset(self):
+        self.define_eras()
+        define_sample(self.alpha, "l4-holdout", "labels", "2023-01-01", "2024-12-31", "holdout", "")
+        define_sample(self.alpha, "other-data", "documents", "2023-01-01", "2024-12-31", "holdout", "")
+        define_sample(self.alpha, "doc-set", "documents", None, None, "holdout", "Undated")
+        study = create_study(self.alpha, "L4", "Evaluate 2023-24.")
+        record_use(self.alpha, "l4-holdout", "evaluate", study["id"], "2026-07-04", "", False)
+        later = create_study(self.alpha, "Optimizer", "Evaluate 2023-26.")
+        with self.assertRaisesRegex(ResearchError, "via overlapping sample l4-holdout"):
+            record_use(self.alpha, "holdout", "evaluate", later["id"], None, "", False)
+        self.assertEqual(show_sample(self.alpha, "holdout")["status"]["overlapping_uses"], 1)
+        self.assertEqual(show_sample(self.alpha, "fresh")["status"]["state"], "unused")
+        self.assertEqual(show_sample(self.alpha, "other-data")["status"]["state"], "unused")
+        record_use(self.alpha, "other-data", "evaluate", later["id"], None, "", False)
+        self.assertEqual(show_sample(self.alpha, "doc-set")["status"]["state"], "unused")
+
+    def test_backfilled_history_only_conflicts_with_earlier_uses(self):
+        self.define_eras()
+        late = create_study(self.alpha, "Late", "Later work")
+        early = create_study(self.alpha, "Early", "Earlier work")
+        record_use(self.alpha, "holdout", "evaluate", late["id"], "2026-09-06", "", False)
+        record_use(self.alpha, "holdout", "evaluate", early["id"], "2026-07-04", "", False)
+        with self.assertRaises(ResearchError):
+            record_use(self.alpha, "holdout", "evaluate", early["id"], "2099-01-01", "", False)
+        with self.assertRaisesRegex(ResearchError, "needs a --note"):
+            record_use(self.alpha, "fit-era", "fit", None, None, "", False)
+        self.assertIsNone(record_use(self.alpha, "fit-era", "fit", None, None, "Legacy calibration", False)["study_id"])
+
+    def test_run_records_sample_use_and_refusal_leaves_no_run(self):
+        self.define_eras()
+        study = create_study(self.alpha, "Holdout run", "Evaluate the frozen candidate.")
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
+                                [("holdout", "evaluate"), ("fit-era", "fit")])
+        uses = [get_record(self.alpha, "uses", use_id) for use_id in result["sample_uses"]]
+        self.assertEqual({(u["sample"], u["purpose"], u["run_id"]) for u in uses},
+                         {("holdout", "evaluate", result["id"]), ("fit-era", "fit", result["id"])})
+        other = create_study(self.alpha, "Second look", "Evaluate again.")
+        with self.assertRaises(ResearchError):
+            run_experiment(self.alpha, other["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
+                           [("fresh", "evaluate"), ("holdout", "evaluate")])
+        self.assertEqual(len(list_records(self.alpha, "runs")), 1)
+        self.assertEqual(len(list_records(self.alpha, "uses")), 2, "No partial uses from a refused run")
+
+    def test_cli_sample_commands(self):
+        defined = self.cli("sample", "define", "--project", "alpha", "holdout", "--dataset", "labels",
+                           "--start", "2023-01-01", "--role", "holdout")
+        self.assertEqual(defined.returncode, 0, defined.stderr)
+        study = create_study(self.alpha, "Check", "Plan")
+        used = self.cli("sample", "use", "--project", "alpha", "holdout", "--purpose", "evaluate", "--study", study["id"])
+        self.assertEqual(used.returncode, 0, used.stderr)
+        again = self.cli("run", "start", "--project", "alpha", "--study", create_study(self.alpha, "Other", "Plan")["id"],
+                         "--cwd", str(self.root), "--sample", "holdout:evaluate", "--", sys.executable, "-c", "pass")
+        self.assertEqual(again.returncode, 1)
+        self.assertIn("--acknowledge-conflicts", again.stderr)
+        bad = self.cli("run", "start", "--project", "alpha", "--study", study["id"], "--cwd", str(self.root),
+                       "--sample", "holdout:peek", "--", sys.executable, "-c", "pass")
+        self.assertEqual(bad.returncode, 2)
+        shown = json.loads(self.cli("sample", "show", "--project", "alpha", "holdout").stdout)
+        self.assertEqual(shown["status"]["by_purpose"], {"evaluate": 1})
 
     def test_skill_installation_is_portable_and_preserves_existing_edits(self):
         target = self.root / "skills"

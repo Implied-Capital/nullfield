@@ -12,6 +12,7 @@ from pathlib import Path
 from . import __version__
 from .experiments import run_experiment
 from .integration import install_skill
+from .ledger import PURPOSES, ROLES, define_sample, list_samples, record_use, show_sample
 from .store import (ResearchError, Store, add_entry, context, create_study,
                     get_record, list_records, search)
 
@@ -42,6 +43,13 @@ def body(args) -> str:
     if args.text is not None:
         return args.text
     return sys.stdin.read() if str(args.file) == "-" else args.file.read_text(encoding="utf-8")
+
+
+def sample_use(value: str) -> tuple[str, str]:
+    name, _, purpose = value.rpartition(":")
+    if not name or purpose not in PURPOSES:
+        raise argparse.ArgumentTypeError(f"Expected SAMPLE:PURPOSE with purpose one of {', '.join(PURPOSES)}")
+    return name, purpose
 
 
 def parser() -> argparse.ArgumentParser:
@@ -112,6 +120,29 @@ def parser() -> argparse.ArgumentParser:
     scope_flags(read)
     read.add_argument("id")
 
+    samples = commands.add_parser("sample", help="Name evaluation data and record its use").add_subparsers(dest="action", required=True)
+    define = samples.add_parser("define")
+    scope_flags(define)
+    define.add_argument("name")
+    define.add_argument("--dataset", required=True, help="Samples of the same dataset share history when their dates overlap")
+    define.add_argument("--start", help="First date, YYYY-MM-DD; omit for open-ended")
+    define.add_argument("--end", help="Last date, YYYY-MM-DD; omit for open-ended")
+    define.add_argument("--role", choices=ROLES, required=True)
+    define.add_argument("--description", default="")
+    scope_flags(samples.add_parser("list"))
+    show = samples.add_parser("show")
+    scope_flags(show)
+    show.add_argument("name")
+    use = samples.add_parser("use", help="Record that a study saw a sample's outcomes")
+    scope_flags(use)
+    use.add_argument("name")
+    use.add_argument("--purpose", choices=PURPOSES, required=True)
+    use.add_argument("--study")
+    use.add_argument("--date", help="When the data were used, YYYY-MM-DD (default: today); for backfilling history")
+    use.add_argument("--note", default="")
+    use.add_argument("--acknowledge-conflicts", action="store_true",
+                     help="Record even though the ledger shows prior use or a spent holdout")
+
     runs = commands.add_parser("run", help="Execute and record experiment commands").add_subparsers(dest="action", required=True)
     run = runs.add_parser("start")
     scope_flags(run)
@@ -119,6 +150,10 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--cwd", type=Path, required=True, help="Explicit experiment working directory")
     run.add_argument("--timeout", type=positive, default=300)
     run.add_argument("--input", action="append", default=[], help="File to hash before execution; relative to --cwd")
+    run.add_argument("--sample", action="append", default=[], type=sample_use, dest="samples",
+                     help="Repeatable SAMPLE:PURPOSE the command reads; recorded in the ledger before launch")
+    run.add_argument("--acknowledge-conflicts", action="store_true",
+                     help="Run even though the ledger shows prior use or a spent holdout")
     run.add_argument("argv", nargs=argparse.REMAINDER, help="Command and arguments after --; no implicit shell")
     scope_flags(runs.add_parser("list"))
     read = runs.add_parser("read")
@@ -163,7 +198,16 @@ def dispatch(store: Store, args):
         return add_entry(project, args.kind, args.title, body(args), args.study, args.evidence)
     if args.command == "run" and args.action == "start":
         argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
-        return run_experiment(project, args.study, argv, args.cwd, args.timeout, args.input, store.resources(project))
+        return run_experiment(project, args.study, argv, args.cwd, args.timeout, args.input, store.resources(project),
+                              args.samples, args.acknowledge_conflicts)
+    if args.command == "sample":
+        if args.action == "define":
+            return define_sample(project, args.name, args.dataset, args.start, args.end, args.role, args.description)
+        if args.action == "list":
+            return list_samples(project)
+        if args.action == "show":
+            return show_sample(project, args.name)
+        return record_use(project, args.name, args.purpose, args.study, args.date, args.note, args.acknowledge_conflicts)
     collection = {"study": "studies", "entry": "entries", "run": "runs"}[args.command]
     if args.action == "list":
         return list_records(project, collection)

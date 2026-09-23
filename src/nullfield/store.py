@@ -291,6 +291,8 @@ def context(store: Store, project: dict, session_id: str | None, limit: int = 10
              "", "## Local resources"]
     for resource in store.resources(project):
         lines.append(f"- {resource['name']} ({resource['kind']}): {resource['location']} — {resource['description']}")
+    from .ledger import ledger_lines  # The ledger builds on this module's record helpers.
+    lines.extend(["", "## Evaluation samples (all, with recorded use)", *ledger_lines(project)])
     for collection in ("studies", "entries", "runs"):
         records = list_records(project, collection)
         lines.extend(["", f"## Recent {collection} ({min(limit, len(records))} of {len(records)})"])
