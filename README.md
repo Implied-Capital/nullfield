@@ -222,6 +222,26 @@ emit JSON; `context` emits Markdown. `--file -` reads Markdown from stdin. Searc
 matches all whitespace-separated query words, case-insensitively, across complete
 entry bodies and study plans. It includes older and negative results.
 
+## Preregistration
+
+A plan is editable until you freeze it. Freezing stores a copy and SHA-256 of
+`plan.md` with the ledger uses the study had already made:
+
+```bash
+nullfield study freeze --session SESSION_UUID STUDY_UUID
+# after editing plan.md:
+nullfield study freeze --session SESSION_UUID STUDY_UUID \
+  --note 'Lowered the effect threshold to 0.15; only development results had been seen.'
+```
+
+The first freeze is the preregistration. Every later freeze is an amendment
+and needs `--note` saying what changed, why, and which results were visible;
+it records the previous freeze and the study's prior ledger uses, so the
+timing is checkable. Earlier versions are never overwritten. Studies report a
+`plan_status`: `unfrozen`, `frozen`, or `drifted` (edited since the last freeze);
+`study read` includes the `freeze_history`, and `context` shows the status of
+every open study.
+
 ## Evaluation-data ledger
 
 Looking at outcomes cannot be undone. The ledger names evaluation samples and
@@ -262,6 +282,9 @@ The ledger refuses, and records nothing, when a use would compromise a sample:
 - `evaluate` on a sample (or an overlapping one) that an earlier use already
   saw. A study repeating its own evaluation is allowed and remains visible.
 - `fit`, `select`, or `inspect` on a holdout, or on a sample overlapping one.
+- `evaluate` on a holdout (or a sample overlapping one) by a study with no plan
+  frozen by the use's date, by no study at all, or, for a use recorded today,
+  by a study whose plan has drifted since its last freeze.
 
 `--acknowledge-conflicts` records the use anyway and stores the conflicts with
 it; label the result as using previously seen data. Backfilled uses only
