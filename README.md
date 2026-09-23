@@ -189,6 +189,54 @@ emit JSON; `context` emits Markdown. `--file -` reads Markdown from stdin. Searc
 matches all whitespace-separated query words, case-insensitively, across complete
 entry bodies and study plans. It includes older and negative results.
 
+## Evaluation-data ledger
+
+Looking at outcomes cannot be undone. The ledger names evaluation samples and
+records every use of them, across studies, sessions, and agents, so a later
+study can see what its evaluation data have already been used for.
+
+```bash
+nullfield sample define --project options-rv fit-era --dataset labels \
+  --start 2019-01-01 --end 2022-12-31 --role development
+nullfield sample define --project options-rv holdout --dataset labels \
+  --start 2023-01-01 --role holdout --description 'Reserved for frozen candidates'
+```
+
+A sample names a dataset and, optionally, a date range; omit `--start` or
+`--end` for an open-ended range. Samples of the same dataset whose dates
+intersect share history, so using a pooled 2019–2026 sample counts against a
+2023 holdout. Undated samples (a fixed document set, for example) share history
+only with themselves. Definitions are immutable: a changed boundary is a new sample.
+
+Each use has a purpose: `fit` (estimate parameters), `select` (choose among
+variants), `evaluate` (test a frozen candidate), or `inspect` (look at outcomes
+for diagnosis or exploration). Record the uses of a run when starting it:
+
+```bash
+nullfield run start --session SESSION_UUID --study STUDY_UUID --cwd /path/to/backtesting \
+  --sample fit-era:fit --sample holdout:evaluate -- python experiment.py
+```
+
+Or record work done outside the runner, including history, with `--date`:
+
+```bash
+nullfield sample use --session SESSION_UUID holdout --purpose select \
+  --study STUDY_UUID --date 2026-08-06
+```
+
+The ledger refuses, and records nothing, when a use would compromise a sample:
+
+- `evaluate` on a sample (or an overlapping one) that an earlier use already
+  saw. A study repeating its own evaluation is allowed and remains visible.
+- `fit`, `select`, or `inspect` on a holdout, or on a sample overlapping one.
+
+`--acknowledge-conflicts` records the use anyway and stores the conflicts with
+it; label the result as using previously seen data. Backfilled uses only
+conflict with uses dated on or before them. `nullfield sample show NAME` lists
+a sample's uses, and `context` summarizes every sample's status. Run uses are
+recorded before launch, because a command that starts may read outcomes even
+if it fails. The ledger records declared use; it cannot detect undeclared access.
+
 ## Storage and portability
 
 ```text
@@ -205,6 +253,10 @@ runs/<uuid>/
   plan.md                    Protocol copied before execution
   code-*.patch               Tracked Git edits when applicable
   stdout.log / stderr.log    Experiment output
+samples/<name>/
+  record.json                Dataset, date range, role
+uses/<uuid>/
+  record.json                Sample, purpose, study/run, date, acknowledged conflicts
 ```
 
 Notebook files are the source of research content and can be versioned in Git.

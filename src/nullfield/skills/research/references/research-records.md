@@ -12,8 +12,8 @@ Record before the relevant evaluation:
 - The population, outcome, unit, horizon, and data availability assumptions.
 - The baseline, candidates, primary comparison, and meaningful effect or failure.
 - Data and code versions, preparation, costs, constraints, and known defects.
-- Development and evaluation periods, prior exposure to their outcomes, and
-  which choices depend on them.
+- Development and evaluation samples from the project's ledger, their prior
+  uses, and which choices depend on them.
 - The uncertainty method, exclusions, failure handling, variant budget, and
   stopping or escalation criteria.
 

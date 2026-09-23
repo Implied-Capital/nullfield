@@ -111,10 +111,11 @@ Create a study with `nullfield study create --session UUID --title 'QUESTION' --
 copy of the plan as it existed before execution. A frozen copy records timing;
 it does not prove an untouched holdout or prevent access to data.
 
-Prefer experiments that distinguish explanations. Track inspected periods,
-variants, and changes prompted by observed outcomes. A reused evaluation period
-remains inspected across sessions and studies. Investigate coding, alignment,
-and cost assumptions before treating a surprising metric as economic evidence.
+Prefer experiments that distinguish explanations. Track variants and changes
+prompted by observed outcomes. A reused evaluation period remains inspected
+across sessions and studies; the project's evaluation-data ledger records it.
+Investigate coding, alignment, and cost assumptions before treating a
+surprising metric as economic evidence.
 
 Use the host's normal coding and analysis tools. When running an experiment,
 record it through:
@@ -133,9 +134,28 @@ The runner records Git heads and tracked patches, but does not archive untracked
 code, dependencies, or datasets. Add important files as `--input` to fingerprint
 them; preserve source artifacts separately when reproduction requires it.
 
+## Evaluation-data ledger
+
+Before planning, read the evaluation samples in `context` and run
+`nullfield sample show NAME` for each sample the study might use. The plan
+names the samples it will use, each one's purpose (`fit`, `select`, `evaluate`,
+`inspect`), and what they have already been used for. Define missing samples
+with `nullfield sample define` rather than describing periods only in prose.
+
+Record every use when it happens: `--sample NAME:PURPOSE` on `run start`, or
+`nullfield sample use` for work outside the runner (with `--date` when
+backfilling history). Examining a sample's outcomes to make a research choice
+is a use even when no code runs. If the ledger refuses a use, stop and
+report the conflict to the user; pass `--acknowledge-conflicts` only when the
+user accepts that the result uses previously seen data, and label it so in
+every resulting entry. Never define a new sample to avoid a recorded use.
+
 ## Notebook operations
 
 ```bash
+nullfield sample define --session UUID holdout --dataset labels --start 2023-01-01 --role holdout
+nullfield sample show --session UUID holdout
+nullfield sample use --session UUID holdout --purpose inspect --study STUDY_UUID
 nullfield resource add --session UUID pricing /absolute/pricing --kind repo --description 'Pricing implementation'
 nullfield search --session UUID 'transaction costs'
 nullfield study list --session UUID
