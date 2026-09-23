@@ -17,9 +17,9 @@ from unittest.mock import patch
 
 from nullfield.experiments import prepare_run, run_experiment, stop_run, wait_run
 from nullfield.integration import install_skill
-from nullfield.ledger import define_sample, get_sample, list_samples, record_use, show_sample
+from nullfield.ledger import define_sample, get_sample, list_samples, record_use, show_sample, today
 from nullfield.store import (ResearchError, Store, add_entry, annotate, context,
-                                 create_study, get_record, list_records, search)
+                                 create_study, freeze_study, get_record, list_records, search)
 
 
 class ResearchTests(unittest.TestCase):
@@ -376,10 +376,12 @@ class ResearchTests(unittest.TestCase):
         self.define_eras()
         selection = create_study(self.alpha, "Pick a variant", "Compare variants on the holdout.")
         confirm = create_study(self.alpha, "Confirm the variant", "Evaluate the chosen variant.")
-        first = record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-03-02", "", False)
+        freeze_study(self.alpha, selection["id"], "")
+        freeze_study(self.alpha, confirm["id"], "")
+        first = record_use(self.alpha, "holdout", "evaluate", selection["id"], None, "", False)
         self.assertEqual(first["acknowledged_conflicts"], [])
         # The same study repeating its own evaluation is not prior use by someone else.
-        record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-03-03", "", False)
+        record_use(self.alpha, "holdout", "evaluate", selection["id"], None, "", False)
         with self.assertRaisesRegex(ResearchError, first["id"]):
             record_use(self.alpha, "holdout", "evaluate", confirm["id"], None, "", False)
         self.assertEqual(len(list_records(self.alpha, "uses")), 2, "A refused use must not be written")
@@ -404,15 +406,17 @@ class ResearchTests(unittest.TestCase):
         define_sample(self.alpha, "other-data", "documents", "2014-01-01", "2014-12-31", "holdout", "")
         define_sample(self.alpha, "doc-set", "documents", None, None, "holdout", "Undated")
         study = create_study(self.alpha, "Early test", "Evaluate 2014.")
-        record_use(self.alpha, "early-holdout", "evaluate", study["id"], "2026-02-10", "", False)
+        freeze_study(self.alpha, study["id"], "")
+        record_use(self.alpha, "early-holdout", "evaluate", study["id"], None, "", False)
         later = create_study(self.alpha, "Wider test", "Evaluate 2014-16.")
+        freeze_study(self.alpha, later["id"], "")
         with self.assertRaisesRegex(ResearchError, "via overlapping sample early-holdout"):
             record_use(self.alpha, "holdout", "evaluate", later["id"], None, "", False)
         state = show_sample(self.alpha, "holdout")["status"]
         self.assertEqual((state["uses"], state["by_purpose"]), (0, {}))
         self.assertEqual(state["overlapping_by_purpose"], {"evaluate": 1})
         self.assertIn("holdout [holdout] labels 2014-01-01 → 2016-12-31 — own: none; "
-                      "via overlapping samples: evaluate 1; latest 2026-02-10", context(self.store, self.alpha, None))
+                      f"via overlapping samples: evaluate 1; latest {today()}", context(self.store, self.alpha, None))
         self.assertEqual(show_sample(self.alpha, "reserve")["status"]["state"], "unused")
         self.assertEqual(show_sample(self.alpha, "other-data")["status"]["state"], "unused")
         record_use(self.alpha, "other-data", "evaluate", later["id"], None, "", False)
@@ -422,10 +426,11 @@ class ResearchTests(unittest.TestCase):
         self.define_eras()
         late = create_study(self.alpha, "Late", "Later work")
         early = create_study(self.alpha, "Early", "Earlier work")
-        record_use(self.alpha, "holdout", "evaluate", late["id"], "2026-04-20", "", False)
-        record_use(self.alpha, "holdout", "evaluate", early["id"], "2026-02-10", "", False)
+        # A development sample: only the ordering of backfilled uses is under test here.
+        record_use(self.alpha, "train", "evaluate", late["id"], "2026-04-20", "", False)
+        record_use(self.alpha, "train", "evaluate", early["id"], "2026-02-10", "", False)
         with self.assertRaises(ResearchError):
-            record_use(self.alpha, "holdout", "evaluate", early["id"], "2099-01-01", "", False)
+            record_use(self.alpha, "train", "evaluate", early["id"], "2099-01-01", "", False)
         with self.assertRaisesRegex(ResearchError, "needs a --note"):
             record_use(self.alpha, "train", "fit", None, None, "", False)
         self.assertIsNone(record_use(self.alpha, "train", "fit", None, None, "Legacy calibration", False)["study_id"])
@@ -433,6 +438,7 @@ class ResearchTests(unittest.TestCase):
     def test_run_records_sample_use_and_refusal_leaves_no_run(self):
         self.define_eras()
         study = create_study(self.alpha, "Holdout run", "Evaluate the frozen candidate.")
+        freeze_study(self.alpha, study["id"], "")
         result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
                                 [("holdout", "evaluate"), ("train", "fit")])
         uses = [get_record(self.alpha, "uses", use_id) for use_id in result["sample_uses"]]
@@ -450,6 +456,7 @@ class ResearchTests(unittest.TestCase):
                            "--start", "2014-01-01", "--role", "holdout")
         self.assertEqual(defined.returncode, 0, defined.stderr)
         study = create_study(self.alpha, "Check", "Plan")
+        self.assertEqual(self.cli("study", "freeze", "--project", "alpha", study["id"]).returncode, 0)
         used = self.cli("sample", "use", "--project", "alpha", "holdout", "--purpose", "evaluate", "--study", study["id"])
         self.assertEqual(used.returncode, 0, used.stderr)
         again = self.cli("run", "start", "--project", "alpha", "--study", create_study(self.alpha, "Other", "Plan")["id"],
@@ -461,6 +468,53 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(bad.returncode, 2)
         shown = json.loads(self.cli("sample", "show", "--project", "alpha", "holdout").stdout)
         self.assertEqual(shown["status"]["by_purpose"], {"evaluate": 1})
+
+    def test_freezes_record_plan_versions_and_amendments(self):
+        self.define_eras()
+        study = create_study(self.alpha, "Confirmatory test", "Gates: effect > 0.20, coverage 80%.")
+        [state] = annotate(self.alpha, "studies", [get_record(self.alpha, "studies", study["id"])])
+        self.assertEqual((state["plan_status"], state["freezes"]), ("unfrozen", 0))
+        first = freeze_study(self.alpha, study["id"], "")
+        self.assertEqual((first["kind"], first["previous"], first["prior_uses"]), ("freeze", None, []))
+        with self.assertRaisesRegex(ResearchError, "unchanged"):
+            freeze_study(self.alpha, study["id"], "again")
+        record_use(self.alpha, "train", "fit", study["id"], None, "", False)
+        plan = Path(study["path"]) / "plan.md"
+        plan.write_text("Gates: effect > 0.15, coverage 90%.\n")
+        self.assertIn("[plan drifted] Confirmatory test", context(self.store, self.alpha, None))
+        with self.assertRaisesRegex(ResearchError, "needs --note"):
+            freeze_study(self.alpha, study["id"], "")
+        amendment = freeze_study(self.alpha, study["id"], "Threshold lowered after development results were seen.")
+        self.assertEqual((amendment["kind"], amendment["previous"]), ("amendment", first["id"]))
+        self.assertEqual(len(amendment["prior_uses"]), 1, "An amendment records what the study had already seen")
+        self.assertEqual((Path(first["path"]) / "plan.md").read_text(), "Gates: effect > 0.20, coverage 80%.\n")
+        shown = json.loads(self.cli("study", "read", "--project", "alpha", study["id"]).stdout)
+        self.assertEqual(([f["kind"] for f in shown["freeze_history"]], shown["plan_status"]), (["freeze", "amendment"], "frozen"))
+
+    def test_holdout_evaluation_requires_a_frozen_unchanged_plan(self):
+        self.define_eras()
+        study = create_study(self.alpha, "Confirm", "Frozen candidate.")
+        with self.assertRaisesRegex(ResearchError, "no frozen plan"):
+            record_use(self.alpha, "reserve", "evaluate", study["id"], None, "", False)
+        with self.assertRaisesRegex(ResearchError, "without a study"):
+            record_use(self.alpha, "reserve", "evaluate", None, None, "Ad hoc look", False)
+        # Development data needs no preregistration, unless it overlaps a holdout.
+        record_use(self.alpha, "train", "evaluate", study["id"], None, "", False)
+        define_sample(self.alpha, "pooled", "labels", "2010-01-01", "2017-12-31", "development", "")
+        with self.assertRaisesRegex(ResearchError, r"pooled \(holdout: holdout, reserve\)"):
+            record_use(self.alpha, "pooled", "evaluate", study["id"], None, "", False)
+        freeze_study(self.alpha, study["id"], "")
+        with self.assertRaisesRegex(ResearchError, "no frozen plan by 2026-01-01"):
+            record_use(self.alpha, "reserve", "evaluate", study["id"], "2026-01-01", "", False)
+        (Path(study["path"]) / "plan.md").write_text("Edited after freezing.\n")
+        with self.assertRaisesRegex(ResearchError, "changed after its last freeze"):
+            run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
+                           [("reserve", "evaluate")])
+        self.assertEqual(list_records(self.alpha, "runs"), [])
+        freeze_study(self.alpha, study["id"], "Clarified wording only; no results seen.")
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
+                                [("reserve", "evaluate")])
+        self.assertEqual(get_record(self.alpha, "uses", result["sample_uses"][0])["acknowledged_conflicts"], [])
 
     def test_skill_installation_is_portable_and_preserves_existing_edits(self):
         target = self.root / "skills"

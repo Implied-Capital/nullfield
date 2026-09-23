@@ -17,6 +17,9 @@ Record before the relevant evaluation:
 - The uncertainty method, exclusions, failure handling, variant budget, and
   stopping or escalation criteria.
 
+Freeze the plan (`nullfield study freeze`) before the evaluation it governs;
+record later changes as amendments with the visible results stated.
+
 Distinguish diagnostic, exploratory, and confirmatory work. If an item is
 unknown, name the uncertainty instead of filling it with a plausible value.
 Plan changes should state their reason and the results already visible at
