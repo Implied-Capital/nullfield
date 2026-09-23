@@ -165,6 +165,26 @@ interrupt, 127 for launch failure). On POSIX, timeout/interrupt cleanup targets
 the command's process group. A successful process is marked `completed`; that
 does not mean its scientific conclusion is validated.
 
+Long runs can outlive the calling process. `--detach` hands the run to a
+background supervisor and returns once the command has started; the supervisor
+enforces `--timeout`, captures output, and finalizes the record:
+
+```bash
+nullfield run start --session SESSION_UUID --study STUDY_UUID --cwd /path/to/backtesting \
+  --timeout 14400 --detach -- python replay.py
+nullfield run wait --session SESSION_UUID RUN_UUID --timeout 540
+nullfield run stop --session SESSION_UUID RUN_UUID
+```
+
+`run wait` exits with the command's code once it finishes, or 3 if it is still
+running when `--timeout` elapses, so an agent with a bounded tool call can wait
+in chunks. `run stop` terminates the command's process group (foreground or
+detached) and records the run as `stopped` (exit 143). If the process that owns
+a running record dies without finalizing it (a reboot, a killed supervisor),
+`read`, `list`, and `context` report the run as `lost`; lost and running runs
+cannot be cited as evidence. Liveness is a process-ID check, so a reused PID
+can briefly hide a lost run.
+
 Create a notebook entry after reviewing the evidence:
 
 ```bash

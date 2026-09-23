@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from nullfield.experiments import run_experiment
+from nullfield.experiments import prepare_run, run_experiment, stop_run, wait_run
 from nullfield.integration import install_skill
 from nullfield.ledger import define_sample, get_sample, list_samples, record_use, show_sample
 from nullfield.store import (ResearchError, Store, add_entry, annotate, context,
@@ -183,6 +183,77 @@ class ResearchTests(unittest.TestCase):
         saved = get_record(self.alpha, "runs", result["id"])
         self.assertEqual((saved["status"], saved["returncode"]), ("timed_out", 124))
         self.assertIsNotNone(saved["finished_at"])
+
+    def test_detached_run_is_finalized_by_its_supervisor(self):
+        define_sample(self.alpha, "fit-era", "labels", "2019-01-01", "2022-12-31", "development", "")
+        study = create_study(self.alpha, "Background", "Long replay")
+        started = time.monotonic()
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "import time; time.sleep(1); print('done=1')"],
+                                self.root, 30, [], [], [("fit-era", "fit")], detach=True)
+        self.assertLess(time.monotonic() - started, 1, "Detached start must not wait for the command")
+        self.assertEqual(result["status"], "running")
+        self.assertNotEqual(result["runner_pid"], os.getpid())
+        self.assertEqual(len(result["sample_uses"]), 1)
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "finding", "Too early", "Body", study["id"], [f"run:{result['id']}"])
+        finished = wait_run(self.alpha, result["id"], 20)
+        self.assertEqual((finished["state"], finished["returncode"]), ("completed", 0))
+        self.assertIn("done=1", (Path(result["path"]) / "stdout.log").read_text())
+        add_entry(self.alpha, "finding", "Recorded", "Body", study["id"], [f"run:{result['id']}"])
+
+    def test_detached_timeout_and_stop_clean_up_the_command(self):
+        study = create_study(self.alpha, "Budget", "Bounded")
+        timed = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "import time; time.sleep(30)"],
+                               self.root, 1, [], [], detach=True)
+        self.assertEqual(wait_run(self.alpha, timed["id"], 20)["state"], "timed_out")
+        marker = self.root / "survived"
+        child = f"import time; from pathlib import Path; time.sleep(3); Path({str(marker)!r}).write_text('x')"
+        running = run_experiment(self.alpha, study["id"], [sys.executable, "-c", child], self.root, 60, [], [], detach=True)
+        self.assertEqual(wait_run(self.alpha, running["id"], 0.5)["state"], "running")
+        stopped = stop_run(self.alpha, running["id"])
+        self.assertEqual((stopped["state"], stopped["returncode"]), ("stopped", 143))
+        time.sleep(3.5)
+        self.assertFalse(marker.exists(), "Stopped command kept running")
+        with self.assertRaisesRegex(ResearchError, "not running"):
+            stop_run(self.alpha, running["id"])
+
+    def test_run_whose_runner_died_is_reported_lost(self):
+        study = create_study(self.alpha, "Crash", "Runner dies")
+        path = prepare_run(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [], [], False)
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        record = json.loads((path / "record.json").read_text())
+        record["runner_pid"] = dead.pid
+        (path / "record.json").write_text(json.dumps(record))
+        self.assertEqual(wait_run(self.alpha, record["id"], 1)["state"], "lost")
+        self.assertIn(f"{record['id']} [lost]", context(self.store, self.alpha, None))
+        with self.assertRaises(ResearchError):
+            add_entry(self.alpha, "finding", "Lost evidence", "Body", study["id"], [f"run:{record['id']}"])
+
+    def test_cli_detach_wait_and_stop_exit_codes(self):
+        study = create_study(self.alpha, "CLI", "Background")
+        start = self.cli("run", "start", "--project", "alpha", "--study", study["id"], "--cwd", str(self.root),
+                         "--detach", "--timeout", "60", "--", sys.executable, "-c", "import time; time.sleep(30)")
+        self.assertEqual(start.returncode, 0, start.stderr)
+        run_id = json.loads(start.stdout)["id"]
+        self.assertEqual(self.cli("run", "wait", "--project", "alpha", run_id, "--timeout", "1").returncode, 3)
+        self.assertEqual(self.cli("run", "stop", "--project", "alpha", run_id).returncode, 0)
+        self.assertEqual(self.cli("run", "wait", "--project", "alpha", run_id).returncode, 143)
+        # A foreground run is stopped through its own nullfield process.
+        foreground = subprocess.Popen([sys.executable, "-m", "nullfield", "--home", str(self.home), "run", "start",
+                                       "--project", "alpha", "--study", study["id"], "--cwd", str(self.root), "--",
+                                       sys.executable, "-c", "import time; time.sleep(30)"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            live = [r for r in list_records(self.alpha, "runs") if r["id"] != run_id and r.get("pid")]
+            if live:
+                break
+            time.sleep(0.1)
+        stop_run(self.alpha, live[0]["id"])
+        foreground.communicate(timeout=20)
+        self.assertEqual(foreground.returncode, 143)
+        self.assertEqual(get_record(self.alpha, "runs", live[0]["id"])["status"], "stopped")
 
     def test_cli_failed_run_propagates_exit_code_and_json(self):
         study = create_study(self.alpha, "Failure", "Exit nonzero")

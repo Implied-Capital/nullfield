@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .experiments import run_experiment
+from .experiments import run_experiment, stop_run, wait_run
 from .integration import install_skill
 from .ledger import PURPOSES, ROLES, define_sample, list_samples, record_use, show_sample
 from .store import (STUDY_STATES, ResearchError, Store, add_entry, annotate, context,
@@ -158,7 +158,16 @@ def parser() -> argparse.ArgumentParser:
                      help="Repeatable SAMPLE:PURPOSE the command reads; recorded in the ledger before launch")
     run.add_argument("--acknowledge-conflicts", action="store_true",
                      help="Run even though the ledger shows prior use or a spent holdout")
+    run.add_argument("--detach", action="store_true",
+                     help="Return once a background supervisor has started the command; use run wait/stop")
     run.add_argument("argv", nargs=argparse.REMAINDER, help="Command and arguments after --; no implicit shell")
+    wait = runs.add_parser("wait", help="Block until a run finishes; exit 3 if it is still running at --timeout")
+    scope_flags(wait)
+    wait.add_argument("id")
+    wait.add_argument("--timeout", type=positive, help="Seconds to wait (default: until the run finishes)")
+    stop = runs.add_parser("stop", help="Terminate a running command's process group and record it as stopped")
+    scope_flags(stop)
+    stop.add_argument("id")
     scope_flags(runs.add_parser("list"))
     read = runs.add_parser("read")
     scope_flags(read)
@@ -204,7 +213,11 @@ def dispatch(store: Store, args):
     if args.command == "run" and args.action == "start":
         argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
         return run_experiment(project, args.study, argv, args.cwd, args.timeout, args.input, store.resources(project),
-                              args.samples, args.acknowledge_conflicts)
+                              args.samples, args.acknowledge_conflicts, args.detach)
+    if args.command == "run" and args.action == "wait":
+        return wait_run(project, args.id, args.timeout)
+    if args.command == "run" and args.action == "stop":
+        return stop_run(project, args.id)
     if args.command == "sample":
         if args.action == "define":
             return define_sample(project, args.name, args.dataset, args.start, args.end, args.role, args.description)
@@ -223,6 +236,20 @@ def dispatch(store: Store, args):
     return record
 
 
+STILL_RUNNING = 3
+
+
+def run_exit_code(record: dict) -> int:
+    """The command's exit status; 3 while it is still running, 1 if its runner was lost."""
+    state = record.get("state") or record["status"]
+    if state == "running":
+        return STILL_RUNNING
+    if state == "lost":
+        return 1
+    code = record["returncode"]
+    return code if code >= 0 else 128 - code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     store = None
@@ -236,9 +263,10 @@ def main(argv: list[str] | None = None) -> int:
             print(result, end="")
         else:
             print(json.dumps(result, indent=2, ensure_ascii=False))
-        if args.command == "run" and args.action == "start":
-            code = result["returncode"]
-            return code if code >= 0 else 128 - code
+        if args.command == "run" and args.action == "start" and args.detach and result["status"] == "running":
+            return 0
+        if args.command == "run" and args.action in ("start", "wait"):
+            return run_exit_code(result)
         return 0
     except (ResearchError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
         print(f"nullfield: {exc}", file=sys.stderr)

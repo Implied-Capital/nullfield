@@ -130,6 +130,13 @@ precede `--`; the remaining arguments are executed directly, without a shell.
 The result contains the run UUID and paths to stdout, stderr, metadata, and the
 frozen plan. A nonzero CLI exit still leaves a run record. Read the output files
 to assess the result. A completed process is not a validated research finding.
+
+For anything that may outlast one tool call, start the run with `--detach`
+and a realistic `--timeout`, then `nullfield run wait --session UUID RUN_UUID
+--timeout SECONDS` with a timeout below your tool-call limit, repeating while it
+exits 3 (still running). Report launched-but-unfinished runs as running, never
+as results. Use `nullfield run stop` to abandon one; a `lost` run's runner died
+and its output is incomplete.
 The runner records Git heads and tracked patches, but does not archive untracked
 code, dependencies, or datasets. Add important files as `--input` to fingerprint
 them; preserve source artifacts separately when reproduction requires it.
