@@ -163,12 +163,19 @@ def show_sample(project: dict, name: str) -> dict:
 
 
 def status(project: dict, sample: dict) -> dict:
+    """A sample's own uses and, separately, uses of overlapping samples that also saw its data."""
     uses = uses_of(project, sample)
     direct = [u for u in uses if u["sample"] == sample["name"]]
+    overlapping = [u for u in uses if u["sample"] != sample["name"]]
     return {"state": "used" if uses else "unused",
-            "uses": len(direct), "overlapping_uses": len(uses) - len(direct),
-            "by_purpose": dict(Counter(u["purpose"] for u in uses)),
+            "uses": len(direct), "overlapping_uses": len(overlapping),
+            "by_purpose": dict(Counter(u["purpose"] for u in direct)),
+            "overlapping_by_purpose": dict(Counter(u["purpose"] for u in overlapping)),
             "latest": max((u["occurred_on"] for u in uses), default=None)}
+
+
+def purpose_counts(counts: dict) -> str:
+    return ", ".join(f"{p} {n}" for p, n in sorted(counts.items())) or "none"
 
 
 def ledger_lines(project: dict) -> list[str]:
@@ -182,9 +189,9 @@ def ledger_lines(project: dict) -> list[str]:
         if state["state"] == "unused":
             summary = "UNUSED"
         else:
-            purposes = ", ".join(f"{p} {n}" for p, n in sorted(state["by_purpose"].items()))
-            summary = f"used: {purposes}; latest {state['latest']}"
+            summary = f"own: {purpose_counts(state['by_purpose'])}"
             if state["overlapping_uses"]:
-                summary += f"; {state['overlapping_uses']} via overlapping samples"
+                summary += f"; via overlapping samples: {purpose_counts(state['overlapping_by_purpose'])}"
+            summary += f"; latest {state['latest']}"
         lines.append(f"- {sample['name']} [{sample['role']}] {sample['dataset']} {window} — {summary}")
     return lines
