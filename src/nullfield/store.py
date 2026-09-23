@@ -236,11 +236,26 @@ def create_study(project: dict, title: str, plan: str) -> dict:
     return {**record, "path": str(path)}
 
 
-def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | None, evidence: list[str]) -> dict:
+STUDY_STATES = ("open", "concluded", "abandoned")
+
+
+def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | None, evidence: list[str],
+              supersedes: list[str] = (), study_state: str | None = None) -> dict:
     if not title.strip() or not body.strip():
         raise ResearchError("An entry needs a title and a body.")
     if study_id:
         get_record(project, "studies", study_id)
+    if study_state is not None:
+        if study_state not in STUDY_STATES:
+            raise ResearchError(f"Study state must be one of: {', '.join(STUDY_STATES)}")
+        if kind != "decision" or not study_id:
+            raise ResearchError("Only a decision entry with --study can change a study's state.")
+    replaced = []
+    for ref in supersedes:
+        target = ref[6:] if ref.startswith("entry:") else ref
+        get_record(project, "entries", target)
+        if target not in replaced:
+            replaced.append(target)
     if kind == "finding" and not evidence:
         raise ResearchError("A finding needs --evidence (a run ID, entry ID, URL, or existing file).")
     resolved = []
@@ -261,11 +276,46 @@ def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | N
                 raise ResearchError(f"Evidence file does not exist: {path}")
             resolved.append(str(path))
     record = {"id": new_id(), "project_id": project["id"], "kind": kind, "title": title,
-              "created_at": now(), "study_id": study_id, "evidence": resolved}
+              "created_at": now(), "study_id": study_id, "evidence": resolved,
+              "supersedes": replaced, "study_state": study_state}
     path = record_path(project, "entries", record["id"])
     atomic_text(path / "note.md", f"# {title}\n\n{body.strip()}\n")
     write_json(path / "record.json", record)
     return {**record, "path": str(path)}
+
+
+def superseded_by(entries: list[dict]) -> dict[str, list[str]]:
+    """Map each superseded entry ID to the IDs of the later entries that replace it."""
+    index: dict[str, list[str]] = {}
+    for entry in sorted(entries, key=lambda e: (e["created_at"], e["id"])):
+        for target in entry.get("supersedes", []):
+            index.setdefault(target, []).append(entry["id"])
+    return index
+
+
+def study_states(entries: list[dict]) -> dict[str, dict]:
+    """Each study's current state: the latest unsuperseded decision that set one. Studies start open.
+
+    A superseded decision no longer speaks for its study, so its replacement must restate the state.
+    """
+    replaced = superseded_by(entries)
+    states: dict[str, dict] = {}
+    for entry in sorted(entries, key=lambda e: (e["created_at"], e["id"])):
+        if entry.get("study_state") and entry["id"] not in replaced:
+            states[entry["study_id"]] = {"state": entry["study_state"], "decision": entry["id"]}
+    return states
+
+
+def annotate(project: dict, collection: str, records: list[dict]) -> list[dict]:
+    """Attach derived status: superseded_by for entries, state for studies."""
+    entries = list_records(project, "entries")
+    if collection == "entries":
+        index = superseded_by(entries)
+        return [{**r, "superseded_by": index.get(r["id"], [])} for r in records]
+    if collection == "studies":
+        states = study_states(entries)
+        return [{**r, **states.get(r["id"], {"state": "open", "decision": None})} for r in records]
+    return records
 
 
 def search(project: dict, query: str, limit: int = 20) -> list[dict]:
@@ -280,7 +330,11 @@ def search(project: dict, query: str, limit: int = 20) -> list[dict]:
             if all(term in text.casefold() for term in terms):
                 line = next((line for line in body.splitlines() if any(t in line.casefold() for t in terms)), "")
                 matches.append({**record, "collection": collection, "excerpt": line[:400]})
-    return sorted(matches, key=lambda r: r["created_at"], reverse=True)[:limit]
+    matches = sorted(matches, key=lambda r: r["created_at"], reverse=True)[:limit]
+    entries = annotate(project, "entries", [m for m in matches if m["collection"] == "entries"])
+    studies = annotate(project, "studies", [m for m in matches if m["collection"] == "studies"])
+    annotated = {r["id"]: r for r in entries + studies}
+    return [annotated[m["id"]] for m in matches]
 
 
 def context(store: Store, project: dict, session_id: str | None, limit: int = 10) -> str:
@@ -293,12 +347,21 @@ def context(store: Store, project: dict, session_id: str | None, limit: int = 10
         lines.append(f"- {resource['name']} ({resource['kind']}): {resource['location']} — {resource['description']}")
     from .ledger import ledger_lines  # The ledger builds on this module's record helpers.
     lines.extend(["", "## Evaluation samples (all, with recorded use)", *ledger_lines(project)])
-    for collection in ("studies", "entries", "runs"):
-        records = list_records(project, collection)
+    studies = annotate(project, "studies", list_records(project, "studies"))
+    entries = annotate(project, "entries", list_records(project, "entries"))
+    open_studies = [r for r in studies if r["state"] == "open"]
+    questions = [r for r in entries if r["kind"] == "question" and not r["superseded_by"]]
+    lines.extend(["", f"## Open studies (all {len(open_studies)})"])
+    lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in open_studies)
+    lines.extend(["", f"## Open questions (all {len(questions)})"])
+    lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in questions)
+    for collection, records in (("studies", studies), ("entries", entries), ("runs", list_records(project, "runs"))):
         lines.extend(["", f"## Recent {collection} ({min(limit, len(records))} of {len(records)})"])
         for record in records[:limit]:
             label = record.get("title") or " ".join(record["command"])
-            status = record.get("kind") or record.get("status", "study")
+            status = record.get("kind") or record.get("state") or record.get("status")
+            if record.get("superseded_by"):
+                status += f"; superseded by {', '.join(record['superseded_by'])}"
             lines.append(f"- {record['id']} [{status}] {label} — {record['path']}")
     lines.extend(["", "This is an index, not the complete evidence. Search related studies and entries,",
                   "including negative results, and open the underlying records before continuing."])

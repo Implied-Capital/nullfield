@@ -162,6 +162,8 @@ nullfield study list --session UUID
 nullfield study read --session UUID STUDY_UUID
 nullfield entry read --session UUID ENTRY_UUID
 nullfield run read --session UUID RUN_UUID
+nullfield entry add --session UUID --study STUDY_UUID --kind decision \
+  --title 'Stop: the gain is inside the spread' --file /absolute/decision.md --study-state concluded
 nullfield entry add --session UUID --study STUDY_UUID --kind finding \
   --title 'Improvement disappears at observed spreads' --file /absolute/finding.md \
   --evidence run:RUN_UUID
@@ -173,12 +175,20 @@ Evidence validation checks references, not whether they justify a claim.
 Represent inconclusive and negative results explicitly. State each finding's
 scope, assumptions, uncertainty, and contrary evidence in its Markdown body.
 
-Record substantial revisions as new entries that cite earlier ones. Link to
+Record a correction, reversal, or answer as a new entry with `--supersedes
+ENTRY_UUID`; the earlier entry stays unchanged and is reported as superseded in
+`read`, `list`, `search`, and `context`. Supersede only an entry the new one
+replaces as the current word; cite supporting entries with `--evidence`
+instead. Before relying on a retrieved entry, check `superseded_by`. Link to
 another project's evidence by file or URL and preserve its original scope;
 don't silently copy its conclusions into this project as established facts.
+
 Finish a substantial investigation with a decision entry explaining what changed,
-what remains uncertain, and the next action or reason to stop. Let the user's
-objective and budget determine whether to continue autonomously.
+what remains uncertain, and the next action or reason to stop. Pass
+`--study STUDY_UUID --study-state concluded` (or `abandoned`, or `open` to
+reopen) so the study's state follows the decision. A decision that supersedes
+a state-setting decision must restate the state. Let the user's objective and
+budget determine whether to continue autonomously.
 
 ## Sessions and continuation
 
