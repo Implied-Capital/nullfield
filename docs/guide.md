@@ -35,22 +35,22 @@ reinstall the skill with `--force` after moving the installation.
 ## Create a project
 
 ```bash
-nullfield project create options-rv \
-  --name 'Options relative value' \
+nullfield project create momentum \
+  --name 'Momentum costs' \
   --objective 'Determine whether the signal survives realistic trading costs.'
 ```
 
-By default the notebook is created at `~/.nullfield/projects/options-rv`.
+By default the notebook is created at `~/.nullfield/projects/momentum`.
 Use `--path /absolute/notebook/location` to place it anywhere. That directory
 must be new or empty. No repository initialization or code changes are required.
 
 Attach local resources as needed:
 
 ```bash
-nullfield resource add --project options-rv pricing /path/to/pricing --kind repo
-nullfield resource add --project options-rv backtesting /path/to/backtesting --kind repo
-nullfield resource add --project options-rv prices /path/to/prices.parquet --kind dataset
-nullfield resource add --project options-rv paper https://example.org/paper --kind reference
+nullfield resource add --project momentum pricing /path/to/pricing --kind repo
+nullfield resource add --project momentum backtesting /path/to/backtesting --kind repo
+nullfield resource add --project momentum prices /path/to/prices.parquet --kind dataset
+nullfield resource add --project momentum paper https://example.org/paper --kind reference
 ```
 
 Resources are named references. Adding one does not copy data, load it into an
@@ -78,8 +78,8 @@ Additional user-created files are left in place. No host configuration files are
 Then invoke it in your existing agent:
 
 ```text
-Codex:       $research options-rv
-Claude Code: /research options-rv
+Codex:       $research momentum
+Claude Code: /research momentum
 ```
 
 Ask it to continue a named study or investigate a question. The skill selects
@@ -110,7 +110,7 @@ and [Claude Code skills](https://code.claude.com/docs/en/skills).
 ## Explicit session selection
 
 ```bash
-nullfield session start options-rv --agent codex
+nullfield session start momentum --agent codex
 ```
 
 The JSON result contains a research-session UUID. Pass that UUID with every
@@ -259,9 +259,9 @@ records every use of them, across studies, sessions, and agents, so a later
 study can see what its evaluation data have already been used for.
 
 ```bash
-nullfield sample define --project options-rv train --dataset labels \
+nullfield sample define --project momentum train --dataset labels \
   --start 2010-01-01 --end 2013-12-31 --role development
-nullfield sample define --project options-rv holdout --dataset labels \
+nullfield sample define --project momentum holdout --dataset labels \
   --start 2014-01-01 --role holdout --description 'Reserved for frozen candidates'
 ```
 
@@ -336,7 +336,7 @@ with `NULLFIELD_HOME` or `nullfield --home PATH ...` (before the subcommand).
 To move or clone a notebook:
 
 ```bash
-nullfield project register options-rv /new/notebook/location
+nullfield project register momentum /new/notebook/location
 ```
 
 Registration preserves the manifest UUID. Re-registering that UUID updates its
