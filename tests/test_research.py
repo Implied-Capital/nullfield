@@ -516,6 +516,86 @@ class ResearchTests(unittest.TestCase):
                                 [("reserve", "evaluate")])
         self.assertEqual(get_record(self.alpha, "uses", result["sample_uses"][0])["acknowledged_conflicts"], [])
 
+    def test_unique_id_prefixes_resolve_and_are_stored_in_full(self):
+        study = create_study(self.alpha, "Prefixes", "Plan")
+        note = add_entry(self.alpha, "question", "Open item", "Body", study["id"][:8], [])
+        self.assertEqual(note["study_id"], study["id"])
+        answer = add_entry(self.alpha, "finding", "Answer", "Body", study["id"][:10], [f"entry:{note['id'][:8]}"],
+                           [note["id"][:9]])
+        self.assertEqual((answer["evidence"], answer["supersedes"]), ([f"entry:{note['id']}"], [note["id"]]))
+        self.assertEqual(get_record(self.alpha, "entries", answer["id"][:8])["id"], answer["id"])
+        run = run_experiment(self.alpha, study["id"][:8], [sys.executable, "-c", "pass"], self.root, 10, [], [])
+        self.assertEqual(run["study_id"], study["id"])
+        self.assertEqual(wait_run(self.alpha, run["id"][:8], 1)["id"], run["id"])
+        for bad in ("abc", "../../beta", "ABCDEF12", note["id"][:7]):
+            with self.assertRaises(ResearchError):
+                get_record(self.alpha, "entries", bad)
+        session = self.store.start_session(self.alpha, "manual")
+        self.assertEqual(self.store.scope(None, session["id"][:8])["id"], self.alpha["id"])
+        shown = json.loads(self.cli("entry", "read", "--project", "alpha", note["id"][:8]).stdout)
+        self.assertEqual(shown["superseded_by"], [answer["id"]])
+
+    def test_ambiguous_prefix_is_refused(self):
+        ids = ["1234abcd-0000-4000-8000-000000000001", "1234abcd-0000-4000-8000-000000000002"]
+        with patch("nullfield.store.new_id", side_effect=ids):
+            add_entry(self.alpha, "observation", "One", "Body", None, [])
+            add_entry(self.alpha, "observation", "Two", "Body", None, [])
+        with self.assertRaisesRegex(ResearchError, "Ambiguous"):
+            get_record(self.alpha, "entries", "1234abcd")
+        self.assertEqual(get_record(self.alpha, "entries", "1234abcd-0000-4000-8000-000000000002")["title"], "Two")
+
+    def test_declared_outputs_are_fingerprinted_and_small_ones_kept(self):
+        study = create_study(self.alpha, "Outputs", "Plan")
+        script = ("from pathlib import Path; out = Path('out'); (out / 'tables').mkdir(parents=True, exist_ok=True); "
+                  "(out / 'result.json').write_text('{\"effect\": 0.1}'); "
+                  "(out / 'tables' / 'big.bin').write_bytes(b'x' * 4000)")
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", script], self.root, 10, [], [],
+                                outputs=["out", "never-written.csv"], keep_bytes=1000)
+        by_name = {Path(o["path"]).name: o for o in result["outputs"]}
+        self.assertEqual(by_name["result.json"]["kept"], "outputs/out/result.json")
+        self.assertEqual((Path(result["path"]) / "outputs/out/result.json").read_text(), '{"effect": 0.1}')
+        self.assertIsNone(by_name["big.bin"]["kept"], "Files beyond the keep budget are fingerprinted only")
+        self.assertEqual((by_name["big.bin"]["bytes"], len(by_name["big.bin"]["sha256"])), (4000, 64))
+        self.assertTrue(by_name["never-written.csv"]["missing"])
+        detached = run_experiment(self.alpha, study["id"], [sys.executable, "-c", script], self.root, 30, [], [],
+                                  detach=True, outputs=["out/result.json"])
+        finished = wait_run(self.alpha, detached["id"], 20)
+        self.assertEqual(finished["outputs"][0]["kept"], "outputs/out/result.json")
+
+    def test_stderr_summary_counts_repeats_warnings_and_tracebacks(self):
+        study = create_study(self.alpha, "Noise", "Plan")
+        script = ("import sys\nfor _ in range(40): print('lib.py:9: RuntimeWarning: overflow in matmul', file=sys.stderr)\n"
+                  "print('one-off note', file=sys.stderr)\nraise ValueError('bad input')")
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", script], self.root, 10, [], [])
+        summary = result["stderr_summary"]
+        self.assertTrue(summary["traceback"])
+        self.assertEqual(summary["warning_lines"], 40)
+        self.assertEqual(summary["most_repeated"][0], {"count": 40, "line": "lib.py:9: RuntimeWarning: overflow in matmul"})
+        self.assertNotIn("one-off note", [r["line"] for r in summary["most_repeated"]])
+
+    @unittest.skipUnless(shutil.which("git"), "Git is not installed")
+    def test_binary_changes_are_fingerprinted_not_stored(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "model.py").write_text("threshold = 1\n")
+        (repo / "table.bin").write_bytes(bytes(range(256)) * 50)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.org",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "baseline"], check=True)
+        (repo / "model.py").write_text("threshold = 2\n")
+        (repo / "table.bin").write_bytes(bytes(reversed(range(256))) * 50)
+        study = create_study(self.alpha, "Binary", "Plan")
+        result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], repo, 10, [], [])
+        [code] = result["code"]
+        patch_text = (Path(result["path"]) / code["tracked_patch"]).read_bytes()
+        self.assertIn(b"+threshold = 2", patch_text)
+        self.assertNotIn(b"GIT binary patch", patch_text)
+        self.assertLess(len(patch_text), 2000)
+        [binary] = code["binary_changes"]
+        self.assertEqual((binary["path"], binary["bytes"]), ("table.bin", 12800))
+        self.assertEqual(len(binary["sha256"]), 64)
+
     def test_skill_installation_is_portable_and_preserves_existing_edits(self):
         target = self.root / "skills"
         installed = install_skill("codex", target)

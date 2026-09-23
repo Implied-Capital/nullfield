@@ -188,11 +188,18 @@ class Store:
         return {**session, "project_alias": project["alias"], "project_path": project["path"]}
 
     def session(self, session_id: str) -> dict:
-        checked_id(session_id)
-        row = self.db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if not row:
+        try:
+            checked_id(session_id)
+            rows = self.db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchall()
+        except ResearchError:
+            if not isinstance(session_id, str) or not ID_PREFIX.fullmatch(session_id):
+                raise
+            rows = self.db.execute("SELECT * FROM sessions WHERE id LIKE ?", (session_id + "%",)).fetchall()
+        if len(rows) > 1:
+            raise ResearchError(f"Ambiguous session prefix {session_id}: {', '.join(r['id'] for r in rows[:5])}")
+        if not rows:
             raise ResearchError(f"Unknown research session: {session_id}")
-        return dict(row)
+        return dict(rows[0])
 
     def list_sessions(self, project: dict | None = None) -> list[dict]:
         query = "SELECT sessions.*, projects.alias AS project_alias FROM sessions JOIN projects ON project_id = projects.id"
@@ -212,7 +219,27 @@ def record_path(project: dict, collection: str, record_id: str) -> Path:
     return Path(project["path"]) / collection / checked_id(record_id)
 
 
+ID_PREFIX = re.compile(r"[0-9a-f]{8}[0-9a-f-]{0,28}")
+
+
+def resolve_id(project: dict, collection: str, value: str) -> str:
+    """A full record UUID, or the one record whose UUID starts with a prefix of 8+ hex characters."""
+    try:
+        return checked_id(value)
+    except ResearchError:
+        pass
+    if not isinstance(value, str) or not ID_PREFIX.fullmatch(value):
+        raise ResearchError(f"Invalid ID: {value}. Use a full UUID or a unique prefix of at least 8 characters.")
+    matches = sorted(p.parent.name for p in (Path(project["path"]) / collection).glob(f"{value}*/record.json"))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ResearchError(f"No record in {collection} starts with {value}.")
+    raise ResearchError(f"Ambiguous ID prefix {value} in {collection}: {', '.join(matches[:5])}")
+
+
 def get_record(project: dict, collection: str, record_id: str) -> dict:
+    record_id = resolve_id(project, collection, record_id)
     path = record_path(project, collection, record_id)
     record = read_json(path / "record.json")
     if record.get("project_id") != project["id"] or record.get("id") != record_id:
@@ -256,6 +283,7 @@ def plan_status(project: dict, study: dict) -> str:
 def freeze_study(project: dict, study_id: str, note: str) -> dict:
     """Freeze the current plan. Later freezes are amendments and must say why and what had been seen."""
     study = get_record(project, "studies", study_id)
+    study_id = study["id"]
     plan = (Path(study["path"]) / "plan.md").read_bytes()
     digest = hashlib.sha256(plan).hexdigest()
     freezes = study_freezes(project, study_id)
@@ -284,7 +312,7 @@ def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | N
     if not title.strip() or not body.strip():
         raise ResearchError("An entry needs a title and a body.")
     if study_id:
-        get_record(project, "studies", study_id)
+        study_id = get_record(project, "studies", study_id)["id"]
     if study_state is not None:
         if study_state not in STUDY_STATES:
             raise ResearchError(f"Study state must be one of: {', '.join(STUDY_STATES)}")
@@ -292,8 +320,7 @@ def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | N
             raise ResearchError("Only a decision entry with --study can change a study's state.")
     replaced = []
     for ref in supersedes:
-        target = ref[6:] if ref.startswith("entry:") else ref
-        get_record(project, "entries", target)
+        target = get_record(project, "entries", ref[6:] if ref.startswith("entry:") else ref)["id"]
         if target not in replaced:
             replaced.append(target)
     if kind == "finding" and not evidence:
@@ -304,10 +331,9 @@ def add_entry(project: dict, kind: str, title: str, body: str, study_id: str | N
             run = get_record(project, "runs", ref[4:])
             if run["status"] == "running":
                 raise ResearchError("A running experiment is not completed evidence.")
-            resolved.append(ref)
+            resolved.append(f"run:{run['id']}")
         elif ref.startswith("entry:"):
-            get_record(project, "entries", ref[6:])
-            resolved.append(ref)
+            resolved.append(f"entry:{get_record(project, 'entries', ref[6:])['id']}")
         elif ref.startswith(("https://", "http://")):
             resolved.append(ref)
         else:

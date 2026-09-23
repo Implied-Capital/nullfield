@@ -162,7 +162,7 @@ def write_use(project: dict, sample: dict, purpose: str, study_id: str | None, r
 def record_use(project: dict, sample_name: str, purpose: str, study_id: str | None,
                occurred_on: str | None, note: str, acknowledge: bool) -> dict:
     if study_id:
-        get_record(project, "studies", study_id)
+        study_id = get_record(project, "studies", study_id)["id"]
     elif not note.strip():
         raise ResearchError("A use without --study needs a --note saying who used the data and why.")
     occurred_on = checked_date(occurred_on) or today()
