@@ -229,16 +229,16 @@ records every use of them, across studies, sessions, and agents, so a later
 study can see what its evaluation data have already been used for.
 
 ```bash
-nullfield sample define --project options-rv fit-era --dataset labels \
-  --start 2019-01-01 --end 2022-12-31 --role development
+nullfield sample define --project options-rv train --dataset labels \
+  --start 2010-01-01 --end 2013-12-31 --role development
 nullfield sample define --project options-rv holdout --dataset labels \
-  --start 2023-01-01 --role holdout --description 'Reserved for frozen candidates'
+  --start 2014-01-01 --role holdout --description 'Reserved for frozen candidates'
 ```
 
 A sample names a dataset and, optionally, a date range; omit `--start` or
 `--end` for an open-ended range. Samples of the same dataset whose dates
-intersect share history, so using a pooled 2019–2026 sample counts against a
-2023 holdout. Undated samples (a fixed document set, for example) share history
+intersect share history, so using a pooled 2010–2017 sample counts against a
+2014 holdout. Undated samples (a fixed document set, for example) share history
 only with themselves. Definitions are immutable: a changed boundary is a new sample.
 
 Each use has a purpose: `fit` (estimate parameters), `select` (choose among
@@ -247,14 +247,14 @@ for diagnosis or exploration). Record the uses of a run when starting it:
 
 ```bash
 nullfield run start --session SESSION_UUID --study STUDY_UUID --cwd /path/to/backtesting \
-  --sample fit-era:fit --sample holdout:evaluate -- python experiment.py
+  --sample train:fit --sample holdout:evaluate -- python experiment.py
 ```
 
 Or record work done outside the runner, including history, with `--date`:
 
 ```bash
 nullfield sample use --session SESSION_UUID holdout --purpose select \
-  --study STUDY_UUID --date 2026-08-06
+  --study STUDY_UUID --date 2026-03-02
 ```
 
 The ledger refuses, and records nothing, when a use would compromise a sample:

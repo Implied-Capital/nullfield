@@ -160,7 +160,7 @@ every resulting entry. Never define a new sample to avoid a recorded use.
 ## Notebook operations
 
 ```bash
-nullfield sample define --session UUID holdout --dataset labels --start 2023-01-01 --role holdout
+nullfield sample define --session UUID holdout --dataset labels --start 2014-01-01 --role holdout
 nullfield sample show --session UUID holdout
 nullfield sample use --session UUID holdout --purpose inspect --study STUDY_UUID
 nullfield resource add --session UUID pricing /absolute/pricing --kind repo --description 'Pricing implementation'
@@ -170,7 +170,7 @@ nullfield study read --session UUID STUDY_UUID
 nullfield entry read --session UUID ENTRY_UUID
 nullfield run read --session UUID RUN_UUID
 nullfield entry add --session UUID --study STUDY_UUID --kind decision \
-  --title 'Stop: the gain is inside the spread' --file /absolute/decision.md --study-state concluded
+  --title 'Stop: the effect does not survive costs' --file /absolute/decision.md --study-state concluded
 nullfield entry add --session UUID --study STUDY_UUID --kind finding \
   --title 'Improvement disappears at observed spreads' --file /absolute/finding.md \
   --evidence run:RUN_UUID
