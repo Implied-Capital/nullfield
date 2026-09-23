@@ -185,11 +185,11 @@ class ResearchTests(unittest.TestCase):
         self.assertIsNotNone(saved["finished_at"])
 
     def test_detached_run_is_finalized_by_its_supervisor(self):
-        define_sample(self.alpha, "fit-era", "labels", "2019-01-01", "2022-12-31", "development", "")
+        define_sample(self.alpha, "train", "labels", "2010-01-01", "2013-12-31", "development", "")
         study = create_study(self.alpha, "Background", "Long replay")
         started = time.monotonic()
         result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "import time; time.sleep(1); print('done=1')"],
-                                self.root, 30, [], [], [("fit-era", "fit")], detach=True)
+                                self.root, 30, [], [], [("train", "fit")], detach=True)
         self.assertLess(time.monotonic() - started, 1, "Detached start must not wait for the command")
         self.assertEqual(result["status"], "running")
         self.assertNotEqual(result["runner_pid"], os.getpid())
@@ -308,17 +308,17 @@ class ResearchTests(unittest.TestCase):
             self.assertIn(f"+baseline = {expected}", (Path(result["path"]) / code["tracked_patch"]).read_text())
 
     def test_supersession_is_recorded_on_the_new_entry_and_derived_for_the_old(self):
-        original = add_entry(self.alpha, "finding", "Blend Sharpe 4.55", "Informal note.", None, ["https://example.org/a"])
+        original = add_entry(self.alpha, "finding", "Signal A hit rate 0.61", "Informal note.", None, ["https://example.org/a"])
         note = Path(original["path"]) / "note.md"
         before = (note.read_bytes(), (Path(original["path"]) / "record.json").read_bytes())
-        correction = add_entry(self.alpha, "finding", "Blend Sharpe is 4.46", "Corrected.", None,
+        correction = add_entry(self.alpha, "finding", "Signal A hit rate is 0.58", "Corrected.", None,
                                [f"entry:{original['id']}"], [f"entry:{original['id']}", original["id"]])
         self.assertEqual(correction["supersedes"], [original["id"]])
         self.assertEqual(before, (note.read_bytes(), (Path(original["path"]) / "record.json").read_bytes()),
                          "Superseding must not rewrite the earlier entry")
-        [found] = [r for r in search(self.alpha, "4.55") if r["id"] == original["id"]]
+        [found] = [r for r in search(self.alpha, "0.61") if r["id"] == original["id"]]
         self.assertEqual(found["superseded_by"], [correction["id"]])
-        self.assertIn(f"[finding; superseded by {correction['id']}] Blend Sharpe 4.55", context(self.store, self.alpha, None))
+        self.assertIn(f"[finding; superseded by {correction['id']}] Signal A hit rate 0.61", context(self.store, self.alpha, None))
         read = json.loads(self.cli("entry", "read", "--project", "alpha", original["id"]).stdout)
         self.assertEqual(read["superseded_by"], [correction["id"]])
         with self.assertRaises(ResearchError):
@@ -328,11 +328,11 @@ class ResearchTests(unittest.TestCase):
             add_entry(self.alpha, "observation", "Cross-project", "Body", None, [], [other["id"]])
 
     def test_study_state_is_set_by_decisions_and_open_work_is_listed(self):
-        study = create_study(self.alpha, "Exit rules", "Plan")
-        other = create_study(self.alpha, "Blend", "Plan")
-        question = add_entry(self.alpha, "question", "Does loser mean reversion pay?", "Untested.", study["id"], [])
-        answered = add_entry(self.alpha, "question", "Is 0.12 bounce enough?", "Unknown.", None, [])
-        add_entry(self.alpha, "finding", "Bounce 0.16-0.27", "Measured.", None, ["https://example.org/b"], [answered["id"]])
+        study = create_study(self.alpha, "Filter rules", "Plan")
+        other = create_study(self.alpha, "Momentum filter", "Plan")
+        question = add_entry(self.alpha, "question", "Does the volume filter help?", "Untested.", study["id"], [])
+        answered = add_entry(self.alpha, "question", "Is a 5% threshold enough?", "Unknown.", None, [])
+        add_entry(self.alpha, "finding", "Threshold needs 7-9%", "Measured.", None, ["https://example.org/b"], [answered["id"]])
         for i in range(12):
             add_entry(self.alpha, "observation", f"Filler {i}", "Body", None, [])
         text = context(self.store, self.alpha, None, limit=3)
@@ -343,7 +343,7 @@ class ResearchTests(unittest.TestCase):
             add_entry(self.alpha, "finding", "Not a decision", "Body", study["id"], ["https://example.org/c"], [], "concluded")
         with self.assertRaises(ResearchError):
             add_entry(self.alpha, "decision", "No study", "Body", None, [], [], "concluded")
-        close = add_entry(self.alpha, "decision", "Stop exit rules", "Holdout failed.", study["id"], [], [], "concluded")
+        close = add_entry(self.alpha, "decision", "Stop filter rules", "Holdout failed.", study["id"], [], [], "concluded")
         [state] = annotate(self.alpha, "studies", [get_record(self.alpha, "studies", study["id"])])
         self.assertEqual((state["state"], state["decision"]), ("concluded", close["id"]))
         self.assertIn("## Open studies (all 1)", context(self.store, self.alpha, None))
@@ -351,35 +351,35 @@ class ResearchTests(unittest.TestCase):
         add_entry(self.alpha, "decision", "Closing rationale was wrong", "Rerun needed.", study["id"], [], [close["id"]])
         [state] = annotate(self.alpha, "studies", [get_record(self.alpha, "studies", study["id"])])
         self.assertEqual(state["state"], "open")
-        add_entry(self.alpha, "decision", "Abandon blend", "Not deployable.", other["id"], [], [], "abandoned")
+        add_entry(self.alpha, "decision", "Abandon momentum filter", "Not deployable.", other["id"], [], [], "abandoned")
         states = {r["id"]: r["state"] for r in json.loads(self.cli("study", "list", "--project", "alpha").stdout)}
         self.assertEqual(states, {study["id"]: "open", other["id"]: "abandoned"})
 
     def define_eras(self):
-        define_sample(self.alpha, "fit-era", "labels", "2019-01-01", "2022-12-31", "development", "")
-        define_sample(self.alpha, "holdout", "labels", "2023-01-01", "2026-05-21", "holdout", "")
-        define_sample(self.alpha, "fresh", "labels", "2026-05-22", None, "holdout", "Open-ended")
+        define_sample(self.alpha, "train", "labels", "2010-01-01", "2013-12-31", "development", "")
+        define_sample(self.alpha, "holdout", "labels", "2014-01-01", "2016-12-31", "holdout", "")
+        define_sample(self.alpha, "reserve", "labels", "2017-01-01", None, "holdout", "Open-ended")
 
     def test_samples_are_immutable_and_validated(self):
         self.define_eras()
         with self.assertRaises(ResearchError):
-            define_sample(self.alpha, "holdout", "labels", "2020-01-01", None, "holdout", "Redefinition")
+            define_sample(self.alpha, "holdout", "labels", "2011-01-01", None, "holdout", "Redefinition")
         with self.assertRaises(ResearchError):
-            define_sample(self.alpha, "backwards", "labels", "2024-01-01", "2023-01-01", "development", "")
+            define_sample(self.alpha, "backwards", "labels", "2015-01-01", "2014-01-01", "development", "")
         with self.assertRaises(ResearchError):
-            define_sample(self.alpha, "bad-date", "labels", "2024-13-01", None, "development", "")
+            define_sample(self.alpha, "bad-date", "labels", "2015-13-01", None, "development", "")
         with self.assertRaises(ResearchError):
             get_sample(self.beta, "holdout")
-        self.assertEqual([s["name"] for s in list_samples(self.alpha)], ["fit-era", "holdout", "fresh"])
+        self.assertEqual([s["name"] for s in list_samples(self.alpha)], ["train", "holdout", "reserve"])
 
     def test_evaluating_a_used_sample_is_refused_without_acknowledgement(self):
         self.define_eras()
-        selection = create_study(self.alpha, "Pick a profile", "Compare profiles on the holdout.")
-        confirm = create_study(self.alpha, "Confirm the profile", "Evaluate the chosen profile.")
-        first = record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-08-06", "", False)
+        selection = create_study(self.alpha, "Pick a variant", "Compare variants on the holdout.")
+        confirm = create_study(self.alpha, "Confirm the variant", "Evaluate the chosen variant.")
+        first = record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-03-02", "", False)
         self.assertEqual(first["acknowledged_conflicts"], [])
         # The same study repeating its own evaluation is not prior use by someone else.
-        record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-08-07", "", False)
+        record_use(self.alpha, "holdout", "evaluate", selection["id"], "2026-03-03", "", False)
         with self.assertRaisesRegex(ResearchError, first["id"]):
             record_use(self.alpha, "holdout", "evaluate", confirm["id"], None, "", False)
         self.assertEqual(len(list_records(self.alpha, "uses")), 2, "A refused use must not be written")
@@ -393,27 +393,27 @@ class ResearchTests(unittest.TestCase):
         with self.assertRaisesRegex(ResearchError, "holdout sample holdout"):
             record_use(self.alpha, "holdout", "inspect", study["id"], None, "", False)
         # A pooled development sample that overlaps a holdout spends it too.
-        define_sample(self.alpha, "pooled", "labels", "2019-01-01", "2026-12-31", "development", "")
-        with self.assertRaisesRegex(ResearchError, "holdout sample fresh, which overlaps pooled"):
+        define_sample(self.alpha, "pooled", "labels", "2010-01-01", "2017-12-31", "development", "")
+        with self.assertRaisesRegex(ResearchError, "holdout sample reserve, which overlaps pooled"):
             record_use(self.alpha, "pooled", "fit", study["id"], None, "", False)
-        record_use(self.alpha, "fit-era", "fit", study["id"], None, "", False)
+        record_use(self.alpha, "train", "fit", study["id"], None, "", False)
 
     def test_overlapping_samples_share_history_within_a_dataset(self):
         self.define_eras()
-        define_sample(self.alpha, "l4-holdout", "labels", "2023-01-01", "2024-12-31", "holdout", "")
-        define_sample(self.alpha, "other-data", "documents", "2023-01-01", "2024-12-31", "holdout", "")
+        define_sample(self.alpha, "early-holdout", "labels", "2014-01-01", "2014-12-31", "holdout", "")
+        define_sample(self.alpha, "other-data", "documents", "2014-01-01", "2014-12-31", "holdout", "")
         define_sample(self.alpha, "doc-set", "documents", None, None, "holdout", "Undated")
-        study = create_study(self.alpha, "L4", "Evaluate 2023-24.")
-        record_use(self.alpha, "l4-holdout", "evaluate", study["id"], "2026-07-04", "", False)
-        later = create_study(self.alpha, "Optimizer", "Evaluate 2023-26.")
-        with self.assertRaisesRegex(ResearchError, "via overlapping sample l4-holdout"):
+        study = create_study(self.alpha, "Early test", "Evaluate 2014.")
+        record_use(self.alpha, "early-holdout", "evaluate", study["id"], "2026-02-10", "", False)
+        later = create_study(self.alpha, "Wider test", "Evaluate 2014-16.")
+        with self.assertRaisesRegex(ResearchError, "via overlapping sample early-holdout"):
             record_use(self.alpha, "holdout", "evaluate", later["id"], None, "", False)
         state = show_sample(self.alpha, "holdout")["status"]
         self.assertEqual((state["uses"], state["by_purpose"]), (0, {}))
         self.assertEqual(state["overlapping_by_purpose"], {"evaluate": 1})
-        self.assertIn("holdout [holdout] labels 2023-01-01 → 2026-05-21 — own: none; "
-                      "via overlapping samples: evaluate 1; latest 2026-07-04", context(self.store, self.alpha, None))
-        self.assertEqual(show_sample(self.alpha, "fresh")["status"]["state"], "unused")
+        self.assertIn("holdout [holdout] labels 2014-01-01 → 2016-12-31 — own: none; "
+                      "via overlapping samples: evaluate 1; latest 2026-02-10", context(self.store, self.alpha, None))
+        self.assertEqual(show_sample(self.alpha, "reserve")["status"]["state"], "unused")
         self.assertEqual(show_sample(self.alpha, "other-data")["status"]["state"], "unused")
         record_use(self.alpha, "other-data", "evaluate", later["id"], None, "", False)
         self.assertEqual(show_sample(self.alpha, "doc-set")["status"]["state"], "unused")
@@ -422,32 +422,32 @@ class ResearchTests(unittest.TestCase):
         self.define_eras()
         late = create_study(self.alpha, "Late", "Later work")
         early = create_study(self.alpha, "Early", "Earlier work")
-        record_use(self.alpha, "holdout", "evaluate", late["id"], "2026-09-06", "", False)
-        record_use(self.alpha, "holdout", "evaluate", early["id"], "2026-07-04", "", False)
+        record_use(self.alpha, "holdout", "evaluate", late["id"], "2026-04-20", "", False)
+        record_use(self.alpha, "holdout", "evaluate", early["id"], "2026-02-10", "", False)
         with self.assertRaises(ResearchError):
             record_use(self.alpha, "holdout", "evaluate", early["id"], "2099-01-01", "", False)
         with self.assertRaisesRegex(ResearchError, "needs a --note"):
-            record_use(self.alpha, "fit-era", "fit", None, None, "", False)
-        self.assertIsNone(record_use(self.alpha, "fit-era", "fit", None, None, "Legacy calibration", False)["study_id"])
+            record_use(self.alpha, "train", "fit", None, None, "", False)
+        self.assertIsNone(record_use(self.alpha, "train", "fit", None, None, "Legacy calibration", False)["study_id"])
 
     def test_run_records_sample_use_and_refusal_leaves_no_run(self):
         self.define_eras()
         study = create_study(self.alpha, "Holdout run", "Evaluate the frozen candidate.")
         result = run_experiment(self.alpha, study["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
-                                [("holdout", "evaluate"), ("fit-era", "fit")])
+                                [("holdout", "evaluate"), ("train", "fit")])
         uses = [get_record(self.alpha, "uses", use_id) for use_id in result["sample_uses"]]
         self.assertEqual({(u["sample"], u["purpose"], u["run_id"]) for u in uses},
-                         {("holdout", "evaluate", result["id"]), ("fit-era", "fit", result["id"])})
+                         {("holdout", "evaluate", result["id"]), ("train", "fit", result["id"])})
         other = create_study(self.alpha, "Second look", "Evaluate again.")
         with self.assertRaises(ResearchError):
             run_experiment(self.alpha, other["id"], [sys.executable, "-c", "pass"], self.root, 10, [], [],
-                           [("fresh", "evaluate"), ("holdout", "evaluate")])
+                           [("reserve", "evaluate"), ("holdout", "evaluate")])
         self.assertEqual(len(list_records(self.alpha, "runs")), 1)
         self.assertEqual(len(list_records(self.alpha, "uses")), 2, "No partial uses from a refused run")
 
     def test_cli_sample_commands(self):
         defined = self.cli("sample", "define", "--project", "alpha", "holdout", "--dataset", "labels",
-                           "--start", "2023-01-01", "--role", "holdout")
+                           "--start", "2014-01-01", "--role", "holdout")
         self.assertEqual(defined.returncode, 0, defined.stderr)
         study = create_study(self.alpha, "Check", "Plan")
         used = self.cli("sample", "use", "--project", "alpha", "holdout", "--purpose", "evaluate", "--study", study["id"])
