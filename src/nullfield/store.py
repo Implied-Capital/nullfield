@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -236,6 +237,45 @@ def create_study(project: dict, title: str, plan: str) -> dict:
     return {**record, "path": str(path)}
 
 
+def study_freezes(project: dict, study_id: str) -> list[dict]:
+    """A study's frozen plan versions, oldest first."""
+    directory = record_path(project, "studies", study_id) / "freezes"
+    records = [read_json(p) for p in directory.glob("*/record.json")]
+    return sorted(records, key=lambda r: (r["created_at"], r["id"]))
+
+
+def plan_status(project: dict, study: dict) -> str:
+    """unfrozen: never frozen; frozen: plan.md matches the latest freeze; drifted: edited since then."""
+    freezes = study_freezes(project, study["id"])
+    if not freezes:
+        return "unfrozen"
+    current = hashlib.sha256((Path(study["path"]) / "plan.md").read_bytes()).hexdigest()
+    return "frozen" if current == freezes[-1]["plan_sha256"] else "drifted"
+
+
+def freeze_study(project: dict, study_id: str, note: str) -> dict:
+    """Freeze the current plan. Later freezes are amendments and must say why and what had been seen."""
+    study = get_record(project, "studies", study_id)
+    plan = (Path(study["path"]) / "plan.md").read_bytes()
+    digest = hashlib.sha256(plan).hexdigest()
+    freezes = study_freezes(project, study_id)
+    if freezes and freezes[-1]["plan_sha256"] == digest:
+        raise ResearchError("The plan is unchanged since its last freeze.")
+    if freezes and not note.strip():
+        raise ResearchError("An amendment needs --note: what changed, why, and which results were visible.")
+    # What this study had already seen when the plan was fixed or changed.
+    seen = [u["id"] for u in list_records(project, "uses") if u.get("study_id") == study_id]
+    record = {"id": new_id(), "project_id": project["id"], "study_id": study_id,
+              "kind": "amendment" if freezes else "freeze", "created_at": now(),
+              "plan_sha256": digest, "previous": freezes[-1]["id"] if freezes else None,
+              "note": note.strip(), "prior_uses": seen}
+    path = Path(study["path"]) / "freezes" / record["id"]
+    path.mkdir(parents=True)
+    (path / "plan.md").write_bytes(plan)
+    write_json(path / "record.json", record)
+    return {**record, "path": str(path)}
+
+
 STUDY_STATES = ("open", "concluded", "abandoned")
 
 
@@ -314,7 +354,9 @@ def annotate(project: dict, collection: str, records: list[dict]) -> list[dict]:
         return [{**r, "superseded_by": index.get(r["id"], [])} for r in records]
     if collection == "studies":
         states = study_states(entries)
-        return [{**r, **states.get(r["id"], {"state": "open", "decision": None})} for r in records]
+        return [{**r, **states.get(r["id"], {"state": "open", "decision": None}),
+                 "plan_status": plan_status(project, r), "freezes": len(study_freezes(project, r["id"]))}
+                for r in records]
     if collection == "runs":
         from .experiments import run_state  # Liveness needs the runner's process helpers.
         return [{**r, "state": run_state(r)} for r in records]
@@ -355,7 +397,7 @@ def context(store: Store, project: dict, session_id: str | None, limit: int = 10
     open_studies = [r for r in studies if r["state"] == "open"]
     questions = [r for r in entries if r["kind"] == "question" and not r["superseded_by"]]
     lines.extend(["", f"## Open studies (all {len(open_studies)})"])
-    lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in open_studies)
+    lines.extend(f"- {r['id']} [plan {r['plan_status']}] {r['title']} — {r['path']}" for r in open_studies)
     lines.extend(["", f"## Open questions (all {len(questions)})"])
     lines.extend(f"- {r['id']} {r['title']} — {r['path']}" for r in questions)
     runs = annotate(project, "runs", list_records(project, "runs"))

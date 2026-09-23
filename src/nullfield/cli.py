@@ -14,7 +14,8 @@ from .experiments import run_experiment, stop_run, wait_run
 from .integration import install_skill
 from .ledger import PURPOSES, ROLES, define_sample, list_samples, record_use, show_sample
 from .store import (STUDY_STATES, ResearchError, Store, add_entry, annotate, context,
-                    create_study, get_record, list_records, search)
+                    create_study, freeze_study, get_record, list_records, search,
+                    study_freezes)
 
 
 def positive(value: str) -> int:
@@ -102,6 +103,10 @@ def parser() -> argparse.ArgumentParser:
     scope_flags(study)
     study.add_argument("--title", required=True)
     text_flags(study, "plan")
+    freeze = studies.add_parser("freeze", help="Freeze the current plan; later freezes are amendments")
+    scope_flags(freeze)
+    freeze.add_argument("id")
+    freeze.add_argument("--note", default="", help="Required for amendments: what changed, why, what results were visible")
     scope_flags(studies.add_parser("list"))
     read = studies.add_parser("read")
     scope_flags(read)
@@ -207,6 +212,8 @@ def dispatch(store: Store, args):
         return search(project, args.query, args.limit)
     if args.command == "study" and args.action == "create":
         return create_study(project, args.title, body(args))
+    if args.command == "study" and args.action == "freeze":
+        return freeze_study(project, args.id, args.note)
     if args.command == "entry" and args.action == "add":
         return add_entry(project, args.kind, args.title, body(args), args.study, args.evidence,
                          args.supersedes, args.study_state)
@@ -233,6 +240,8 @@ def dispatch(store: Store, args):
     if args.command != "run":
         filename = "plan.md" if args.command == "study" else "note.md"
         record["body"] = (Path(record["path"]) / filename).read_text(encoding="utf-8")
+    if args.command == "study":
+        record["freeze_history"] = study_freezes(project, args.id)
     return record
 
 

@@ -13,8 +13,8 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .store import (ResearchError, alias_name, get_record, list_records, new_id,
-                    now, read_json, record_path, write_json)
+from .store import (ResearchError, alias_name, get_record, list_records, new_id, now,
+                    plan_status, read_json, record_path, study_freezes, write_json)
 
 ROLES = ("development", "holdout")
 PURPOSES = ("fit", "select", "evaluate", "inspect")
@@ -99,6 +99,7 @@ def conflicts(project: dict, sample: dict, purpose: str, study_id: str | None, o
                 via = "" if other["name"] == sample["name"] else f", which overlaps {sample['name']}"
                 reasons.append(f"holdout sample {other['name']}{via}: using it to {purpose} spends it")
     else:
+        reasons.extend(preregistration_gaps(project, sample, study_id, occurred_on))
         for use in uses_of(project, sample, before=occurred_on):
             # Repeating a study's own evaluation is visible in the ledger but is not prior use.
             if study_id and use["study_id"] == study_id and use["purpose"] == "evaluate":
@@ -110,6 +111,24 @@ def conflicts(project: dict, sample: dict, purpose: str, study_id: str | None, o
                 who = f"no study ({use['note']})"
             reasons.append(f"prior use {use['id']}: {use['purpose']} on {use['occurred_on']} by {who}{via}")
     return reasons
+
+
+def preregistration_gaps(project: dict, sample: dict, study_id: str | None, occurred_on: str) -> list[str]:
+    """An evaluation touching a holdout needs a plan frozen by then, and unchanged since if the use is today."""
+    holdouts = [s["name"] for s in list_samples(project) if s["role"] == "holdout" and overlaps(sample, s)]
+    if not holdouts:
+        return []
+    touching = f"evaluating {sample['name']} (holdout: {', '.join(holdouts)})"
+    if not study_id:
+        return [f"{touching} without a study, so without a frozen plan"]
+    study = get_record(project, "studies", study_id)
+    frozen = [f for f in study_freezes(project, study_id) if f["created_at"][:10] <= occurred_on]
+    if not frozen:
+        return [f"{touching}: study '{study['title']}' had no frozen plan by {occurred_on}; "
+                "run 'nullfield study freeze' first"]
+    if occurred_on == today() and plan_status(project, study) == "drifted":
+        return [f"{touching}: the plan changed after its last freeze; freeze an amendment first"]
+    return []
 
 
 def check_uses(project: dict, requests: list[tuple[str, str]], study_id: str | None,

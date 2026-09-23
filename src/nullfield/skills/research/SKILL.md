@@ -141,6 +141,18 @@ The runner records Git heads and tracked patches, but does not archive untracked
 code, dependencies, or datasets. Add important files as `--input` to fingerprint
 them; preserve source artifacts separately when reproduction requires it.
 
+## Preregistration
+
+Freeze a study's plan with `nullfield study freeze --session UUID STUDY_UUID`
+before its first evaluation on holdout data, and before looking at any
+outcome the plan's decision depends on. After freezing, change the plan only
+by editing `plan.md` and freezing again with `--note` stating what changed,
+why, and which results were visible; this records an amendment and never
+overwrites the earlier version. Check `plan_status` in `study read`: a
+`drifted` plan has unrecorded edits. The ledger refuses a holdout evaluation
+without a frozen, unchanged plan. Do not freeze a plan to get past that
+refusal after results were seen; record an amendment that says so.
+
 ## Evaluation-data ledger
 
 Before planning, read the evaluation samples in `context` and run
